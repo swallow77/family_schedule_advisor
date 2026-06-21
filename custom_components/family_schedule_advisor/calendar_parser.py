@@ -92,8 +92,8 @@ def _parse_sensor_entity(hass: HomeAssistant, entity_id: str) -> EventInfo | Non
 
     attrs = state_obj.attributes
     title = str(attrs.get("message") or attrs.get("summary") or attrs.get("title") or "").strip()
-    location = str(attrs.get("location") or "").strip()
-    description = str(attrs.get("description") or "").strip()
+    location = str(attrs.get("location") or attrs.get("place") or attrs.get("where") or "").strip()
+    description = str(attrs.get("description") or attrs.get("desc") or "").strip()
     start = _parse_datetime(attrs.get("start_time") or attrs.get("start") or attrs.get("date_time"))
     end = _parse_datetime(attrs.get("end_time") or attrs.get("end"))
 
@@ -154,8 +154,8 @@ def _parse_calendar_event(entity_id: str, item: dict[str, Any]) -> EventInfo | N
         raw_end = end
 
     title = str(item.get("summary") or item.get("title") or item.get("message") or "일정").strip()
-    location = str(item.get("location") or "").strip()
-    description = str(item.get("description") or "").strip()
+    location = str(item.get("location") or item.get("place") or item.get("where") or "").strip()
+    description = str(item.get("description") or item.get("desc") or "").strip()
     return EventInfo(
         key=_event_key(entity_id, start_dt, title),
         title=title,
@@ -185,7 +185,13 @@ async def async_get_event_candidates(
     min_hour: int,
     max_hour: int,
 ) -> list[EventCandidate]:
-    """Get parsed event candidates from calendar and sensor entities."""
+    """Get parsed event candidates from calendar and sensor entities.
+
+    Real calendar.* entities are preferred over legacy sensor.calendar_* entities.
+    If a calendar.* entity returns any event in the lookahead range, legacy sensors are
+    ignored. This prevents old template sensors with missing location or 12-hour time
+    text from overriding the richer Google Calendar event.
+    """
     now = dt_util.now()
     until = now + timedelta(hours=lookahead_hours)
     parsed_events: list[EventInfo] = []
@@ -193,11 +199,7 @@ async def async_get_event_candidates(
     sensor_entities = [e for e in entity_ids if not e.startswith("calendar.")]
     calendar_entities = [e for e in entity_ids if e.startswith("calendar.")]
 
-    for entity_id in sensor_entities:
-        event = _parse_sensor_entity(hass, entity_id)
-        if event is not None:
-            parsed_events.append(event)
-
+    calendar_events: list[EventInfo] = []
     if calendar_entities:
         try:
             response = await hass.services.async_call(
@@ -215,12 +217,20 @@ async def async_get_event_candidates(
                 for item in payload.get("events", []):
                     event = _parse_calendar_event(entity_id, item)
                     if event is not None:
-                        parsed_events.append(event)
+                        calendar_events.append(event)
         except (HomeAssistantError, ValueError, TypeError) as err:
             _LOGGER.warning("Could not read calendar events: %s", err)
 
+    if calendar_events:
+        parsed_events.extend(calendar_events)
+    else:
+        for entity_id in sensor_entities:
+            event = _parse_sensor_entity(hass, entity_id)
+            if event is not None:
+                parsed_events.append(event)
+
     candidates = [_validate_event(event, now, until, min_hour, max_hour) for event in parsed_events]
-    candidates.sort(key=lambda item: item.event.start)
+    candidates.sort(key=lambda item: (item.event.start, 0 if item.event.location else 1, item.event.source))
     return candidates
 
 
