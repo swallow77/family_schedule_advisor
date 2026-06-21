@@ -1,7 +1,6 @@
 """Notification helper."""
 from __future__ import annotations
 
-import asyncio
 import logging
 
 from homeassistant.core import HomeAssistant
@@ -18,43 +17,6 @@ def _parse_script(script_entity: str) -> tuple[str, str]:
     return domain, service
 
 
-async def _wait_for_media_state(
-    hass: HomeAssistant,
-    entity_id: str,
-    state: str,
-    timeout: float,
-) -> bool:
-    """Wait until a media entity reaches a state."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    while loop.time() < deadline:
-        if hass.states.is_state(entity_id, state):
-            return True
-        await asyncio.sleep(0.5)
-    return False
-
-
-async def _wait_for_media_idle(
-    hass: HomeAssistant,
-    entity_id: str,
-    timeout: float,
-) -> bool:
-    """Wait until a media entity is not playing for two seconds."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + timeout
-    idle_since: float | None = None
-    while loop.time() < deadline:
-        if hass.states.is_state(entity_id, "playing"):
-            idle_since = None
-        else:
-            if idle_since is None:
-                idle_since = loop.time()
-            elif loop.time() - idle_since >= 2:
-                return True
-        await asyncio.sleep(0.5)
-    return False
-
-
 async def async_send_universal_notify(
     hass: HomeAssistant,
     *,
@@ -65,21 +27,13 @@ async def async_send_universal_notify(
     speed: float,
     pitch: float,
 ) -> None:
-    """Call the configured notify script and wait like a Home Assistant automation."""
+    """Call the configured notify script using the same fire-and-forget style as a manual service call."""
     domain, service = _parse_script(notify_script)
     data = {
         "message": message,
         "tts": True,
         "tts_target": tts_target,
         "tts_service": tts_service,
-        "tts_options": {
-            "speed": speed,
-            "pitch": pitch,
-        },
+        "tts_options": {},
     }
-    await hass.services.async_call(domain, service, data, blocking=True)
-    if tts_target:
-        started = await _wait_for_media_state(hass, tts_target, "playing", 30)
-        if started:
-            await _wait_for_media_idle(hass, tts_target, 300)
-            await asyncio.sleep(5)
+    await hass.services.async_call(domain, service, data, blocking=False)
