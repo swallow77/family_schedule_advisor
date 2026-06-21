@@ -1,0 +1,123 @@
+{
+  "title": "가족 일정 출발 도우미",
+  "config": {
+    "step": {
+      "user": {
+        "title": "가족 일정 출발 도우미 설정",
+        "description": "캘린더 일정, 대중교통 소요시간, 날씨, Ollama를 이용해 출발 전 옷차림 안내를 합니다.",
+        "data": {
+          "calendar_entities": "캘린더/센서 엔티티 목록",
+          "origin_address": "출발지 주소",
+          "google_api_key": "Google Directions API 키",
+          "ollama_url": "Ollama URL",
+          "ollama_model": "Ollama 모델명",
+          "prepare_minutes": "준비 여유시간 분",
+          "arrival_margin_minutes": "도착 여유시간 분",
+          "lookahead_hours": "일정 조회 범위 시간",
+          "min_event_hour": "알림 허용 시작 시간",
+          "max_event_hour": "알림 허용 종료 시간",
+          "enable_ai_destination": "장소 없을 때 AI로 목적지 추출",
+          "notify_script": "알림 스크립트",
+          "tts_target": "TTS 대상",
+          "tts_service": "TTS 서비스",
+          "tts_speed": "TTS 속도",
+          "tts_pitch": "TTS 피치",
+          "weather_rain": "강수확률 센서",
+          "weather_feels_like": "체감온도 센서",
+          "weather_temp": "현재온도 센서",
+          "weather_humidity": "습도 센서",
+          "weather_wind": "풍속 센서",
+          "weather_sky": "하늘상태 센서",
+          "weather_dust": "초미세먼지 센서",
+          "weather_uv": "자외선 센서",
+          "weather_apparent": "실시간 체감온도 센서"
+        }
+      }
+    },
+    "error": {
+      "required": "필수 항목입니다."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "가족 일정 출발 도우미 옵션",
+        "data": {
+          "calendar_entities": "캘린더/센서 엔티티 목록",
+          "origin_address": "출발지 주소",
+          "google_api_key": "Google Directions API 키",
+          "ollama_url": "Ollama URL",
+          "ollama_model": "Ollama 모델명",
+          "prepare_minutes": "준비 여유시간 분",
+          "arrival_margin_minutes": "도착 여유시간 분",
+          "lookahead_hours": "일정 조회 범위 시간",
+          "min_event_hour": "알림 허용 시작 시간",
+          "max_event_hour": "알림 허용 종료 시간",
+          "enable_ai_destination": "장소 없을 때 AI로 목적지 추출",
+          "notify_script": "알림 스크립트",
+          "tts_target": "TTS 대상",
+          "tts_service": "TTS 서비스",
+          "tts_speed": "TTS 속도",
+          "tts_pitch": "TTS 피치",
+          "weather_rain": "강수확률 센서",
+          "weather_feels_like": "체감온도 센서",
+          "weather_temp": "현재온도 센서",
+          "weather_humidity": "습도 센서",
+          "weather_wind": "풍속 센서",
+          "weather_sky": "하늘상태 센서",
+          "weather_dust": "초미세먼지 센서",
+          "weather_uv": "자외선 센서",
+          "weather_apparent": "실시간 체감온도 센서"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "status": {
+        "name": "상태"
+      },
+      "next_event": {
+        "name": "다음 일정"
+      },
+      "event_time": {
+        "name": "일정 시간"
+      },
+      "destination": {
+        "name": "목적지"
+      },
+      "transit_duration": {
+        "name": "대중교통 소요시간"
+      },
+      "departure_time": {
+        "name": "추천 출발 시간"
+      },
+      "notify_time": {
+        "name": "추천 준비 알림 시간"
+      },
+      "route_status": {
+        "name": "경로 상태"
+      },
+      "outfit_message": {
+        "name": "옷차림 안내문"
+      },
+      "recognized_event": {
+        "name": "인식한 일정"
+      },
+      "last_action": {
+        "name": "마지막 동작"
+      },
+      "last_notify_result": {
+        "name": "마지막 알림 결과"
+      }
+    },
+    "button": {
+      "recalculate": {
+        "name": "일정 다시 계산"
+      },
+      "test_notify": {
+        "name": "테스트 알림"
+      }
+    }
+  }
+}
