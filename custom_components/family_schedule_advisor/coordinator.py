@@ -115,6 +115,19 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "last_notify_result": self._last_notify_result,
         }
 
+    @staticmethod
+    def _candidate_sort_key(candidate) -> tuple:
+        """Sort events and prefer rich calendar events over simple sensor events."""
+        event = candidate.event
+        return (
+            event.start,
+            0 if candidate.accepted else 1,
+            0 if event.location and str(event.location).strip() else 1,
+            0 if str(event.source).startswith("calendar.") else 1,
+            0 if event.description and str(event.description).strip() else 1,
+            str(event.source),
+        )
+
     async def async_manual_recalculate(self) -> None:
         """Recalculate from button/service and expose visible feedback."""
         self._mark_action("일정 다시 계산 시작", "")
@@ -170,7 +183,11 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             min_hour,
             max_hour,
         )
-        accepted = [candidate for candidate in candidates if candidate.accepted]
+        candidates = sorted(candidates, key=self._candidate_sort_key)
+        accepted = sorted(
+            [candidate for candidate in candidates if candidate.accepted],
+            key=self._candidate_sort_key,
+        )
         first_candidate = candidates[0] if candidates else None
 
         base_debug = {
@@ -187,6 +204,7 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not accepted:
             if first_candidate is not None:
                 event = first_candidate.event
+                fallback_destination = event.location or event.title
                 return {
                     **base_debug,
                     "status": "필터됨",
@@ -195,9 +213,12 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "recognized_event_text": format_compact_event(event),
                     "raw_event_state": event.raw_text,
                     "event_source": event.source,
+                    "event_location": event.location,
+                    "event_description": event.description,
                     "event_time": event.start.isoformat(),
                     "event_time_text": self._format_korean_time(event.start),
-                    "destination": event.location or event.title,
+                    "destination": fallback_destination,
+                    "destination_source": "calendar_location" if event.location else "event_title",
                     "route_status": "SKIPPED",
                     "message": f"일정은 인식했지만 알림 대상에서 제외되었습니다. 사유: {first_candidate.reject_reason}",
                 }
@@ -208,6 +229,9 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "event_key": "",
                 "recognized_event_text": "인식된 일정 없음",
                 "raw_event_state": "",
+                "event_location": "",
+                "event_description": "",
+                "destination_source": "",
                 "route_status": "",
                 "message": "예정된 일정이 없습니다.",
             }
@@ -218,7 +242,7 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         arrival_margin = int(cfg.get(CONF_ARRIVAL_MARGIN_MINUTES, DEFAULT_ARRIVAL_MARGIN_MINUTES))
         arrival_target = event.start - timedelta(minutes=arrival_margin)
 
-        destination = await self._async_resolve_destination(event)
+        destination, destination_source = await self._async_resolve_destination(event)
         route_status = "SKIPPED"
         route_error = ""
         transit_seconds = 0
@@ -259,9 +283,12 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "recognized_event_text": format_compact_event(event),
             "raw_event_state": event.raw_text,
             "event_source": event.source,
+            "event_location": event.location,
+            "event_description": event.description,
             "event_time": event.start.isoformat(),
             "event_time_text": self._format_korean_time(event.start),
             "destination": destination,
+            "destination_source": destination_source,
             "transit_duration_seconds": transit_seconds,
             "transit_duration_text": transit_text,
             "route_status": route_status,
@@ -276,16 +303,16 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "message": "다음 일정 계산 완료",
         }
 
-    async def _async_resolve_destination(self, event: EventInfo) -> str:
+    async def _async_resolve_destination(self, event: EventInfo) -> tuple[str, str]:
         """Resolve destination from event location, title, description, or AI."""
         cfg = self.config
-        if event.location:
-            return event.location.strip()
+        if event.location and event.location.strip():
+            return event.location.strip(), "calendar_location"
 
         title = event.title.strip()
         description = event.description.strip()
         if not title:
-            return ""
+            return "", "none"
 
         if cfg.get(CONF_ENABLE_AI_DESTINATION, True):
             extracted = await async_extract_destination(
@@ -296,9 +323,9 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 description,
             )
             if extracted:
-                return extracted
+                return extracted, "ai_extracted"
 
-        return title
+        return title, "event_title"
 
     @callback
     def _schedule_from_current_data(self) -> None:
