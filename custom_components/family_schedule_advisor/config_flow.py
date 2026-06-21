@@ -7,6 +7,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import callback
+from homeassistant.helpers import selector
 
 from .const import (
     CONF_ARRIVAL_MARGIN_MINUTES,
@@ -64,11 +65,46 @@ WEATHER_DEFAULTS = {
 }
 
 
+def _normalize_entity_list(value: Any) -> list[str]:
+    """Normalize legacy comma text or entity selector list."""
+    if value is None:
+        value = DEFAULT_CALENDAR_ENTITIES
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    return []
+
+
+def _normalize_user_input(user_input: dict[str, Any]) -> dict[str, Any]:
+    """Normalize submitted values before storing."""
+    normalized = dict(user_input)
+    normalized[CONF_CALENDAR_ENTITIES] = _normalize_entity_list(
+        normalized.get(CONF_CALENDAR_ENTITIES)
+    )
+    return normalized
+
+
+def _calendar_default(defaults: dict[str, Any]) -> list[str]:
+    """Return default calendar entities for the selector."""
+    return _normalize_entity_list(defaults.get(CONF_CALENDAR_ENTITIES, DEFAULT_CALENDAR_ENTITIES))
+
+
+def _calendar_selector():
+    """Return a multi entity selector for calendar and legacy sensor entities."""
+    return selector.EntitySelector(
+        selector.EntitySelectorConfig(
+            domain=["calendar", "sensor"],
+            multiple=True,
+        )
+    )
+
+
 def _schema(defaults: dict[str, Any]) -> vol.Schema:
     """Return common schema."""
     return vol.Schema(
         {
-            vol.Required(CONF_CALENDAR_ENTITIES, default=defaults.get(CONF_CALENDAR_ENTITIES, DEFAULT_CALENDAR_ENTITIES)): str,
+            vol.Required(CONF_CALENDAR_ENTITIES, default=_calendar_default(defaults)): _calendar_selector(),
             vol.Required(CONF_ORIGIN_ADDRESS, default=defaults.get(CONF_ORIGIN_ADDRESS, "")): str,
             vol.Required(CONF_GOOGLE_API_KEY, default=defaults.get(CONF_GOOGLE_API_KEY, "")): str,
             vol.Required(CONF_OLLAMA_URL, default=defaults.get(CONF_OLLAMA_URL, DEFAULT_OLLAMA_URL)): str,
@@ -106,9 +142,10 @@ class FamilyScheduleAdvisorConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = _normalize_user_input(user_input)
             await self.async_set_unique_id(DOMAIN)
             self._abort_if_unique_id_configured()
-            if not user_input[CONF_CALENDAR_ENTITIES].strip():
+            if not user_input[CONF_CALENDAR_ENTITIES]:
                 errors[CONF_CALENDAR_ENTITIES] = "required"
             if not user_input[CONF_ORIGIN_ADDRESS].strip():
                 errors[CONF_ORIGIN_ADDRESS] = "required"
@@ -133,6 +170,7 @@ class FamilyScheduleAdvisorOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Manage options."""
         if user_input is not None:
+            user_input = _normalize_user_input(user_input)
             return self.async_create_entry(title="", data=user_input)
         defaults = dict(self.config_entry.data)
         defaults.update(self.config_entry.options)
