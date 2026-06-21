@@ -13,13 +13,6 @@ from homeassistant.util import dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
 
-# Supports examples:
-# 06월22일 02:01 내과
-# 6월 22일 02:01 내과
-# 06/22 02:01 내과
-# 06-22 02:01 내과
-# 06.22 02:01 내과
-# 2026-06-22 02:01 내과
 SENSOR_RE = re.compile(
     r"(?: (?P<year>\d{4})\s*(?:년|[./-])\s*)?"
     r"(?P<month>\d{1,2})\s*(?:월|[./-])\s*(?P<day>\d{1,2})\s*(?:일)?\s+"
@@ -178,6 +171,51 @@ def _validate_event(event: EventInfo, now, until, min_hour: int, max_hour: int) 
     return EventCandidate(event, True, "")
 
 
+async def _async_call_calendar_get_events(
+    hass: HomeAssistant,
+    calendar_entities: list[str],
+    now,
+    until,
+) -> dict[str, Any]:
+    """Read calendar events using target style first, then legacy data style."""
+    service_data = {
+        "start_date_time": now.isoformat(),
+        "end_date_time": until.isoformat(),
+    }
+    try:
+        response = await hass.services.async_call(
+            "calendar",
+            "get_events",
+            service_data,
+            blocking=True,
+            return_response=True,
+            target={"entity_id": calendar_entities},
+        )
+        if response:
+            return response
+    except TypeError:
+        # Older HA versions may not support target in async_call.
+        pass
+    except (HomeAssistantError, ValueError) as err:
+        _LOGGER.warning("calendar.get_events target call failed: %s", err)
+
+    try:
+        response = await hass.services.async_call(
+            "calendar",
+            "get_events",
+            {
+                "entity_id": calendar_entities,
+                **service_data,
+            },
+            blocking=True,
+            return_response=True,
+        )
+        return response or {}
+    except (HomeAssistantError, ValueError, TypeError) as err:
+        _LOGGER.warning("calendar.get_events legacy call failed: %s", err)
+        return {}
+
+
 async def async_get_event_candidates(
     hass: HomeAssistant,
     entity_ids: list[str],
@@ -185,13 +223,7 @@ async def async_get_event_candidates(
     min_hour: int,
     max_hour: int,
 ) -> list[EventCandidate]:
-    """Get parsed event candidates from calendar and sensor entities.
-
-    Real calendar.* entities are preferred over legacy sensor.calendar_* entities.
-    If a calendar.* entity returns any event in the lookahead range, legacy sensors are
-    ignored. This prevents old template sensors with missing location or 12-hour time
-    text from overriding the richer Google Calendar event.
-    """
+    """Get parsed event candidates from calendar and sensor entities."""
     now = dt_util.now()
     until = now + timedelta(hours=lookahead_hours)
     parsed_events: list[EventInfo] = []
@@ -201,25 +233,12 @@ async def async_get_event_candidates(
 
     calendar_events: list[EventInfo] = []
     if calendar_entities:
-        try:
-            response = await hass.services.async_call(
-                "calendar",
-                "get_events",
-                {
-                    "entity_id": calendar_entities,
-                    "start_date_time": now.isoformat(),
-                    "end_date_time": until.isoformat(),
-                },
-                blocking=True,
-                return_response=True,
-            )
-            for entity_id, payload in (response or {}).items():
-                for item in payload.get("events", []):
-                    event = _parse_calendar_event(entity_id, item)
-                    if event is not None:
-                        calendar_events.append(event)
-        except (HomeAssistantError, ValueError, TypeError) as err:
-            _LOGGER.warning("Could not read calendar events: %s", err)
+        response = await _async_call_calendar_get_events(hass, calendar_entities, now, until)
+        for entity_id, payload in response.items():
+            for item in payload.get("events", []):
+                event = _parse_calendar_event(entity_id, item)
+                if event is not None:
+                    calendar_events.append(event)
 
     if calendar_events:
         parsed_events.extend(calendar_events)
