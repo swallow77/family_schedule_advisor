@@ -4,7 +4,8 @@ Home Assistant custom integration for family schedule based departure, transit, 
 
 ## Features
 
-- Reads upcoming events from configured `sensor.calendar_*` or `calendar.*` entities.
+- Select multiple `calendar.*` or legacy `sensor.calendar_*` entities from the setup screen.
+- Supports multiple Google Calendar accounts/calendars at the same time.
 - Shows the raw recognized event in `sensor.family_schedule_advisor_recognized_event`.
 - Extracts destination from event title/location, with optional Ollama based destination extraction.
 - Calculates public transit duration with Google Directions API.
@@ -27,6 +28,21 @@ Restart Home Assistant, then add the integration from:
 ```text
 Settings → Devices & services → Add integration → Family Schedule Advisor
 ```
+
+## Calendar selection
+
+From version `0.2.5`, the calendar setting is no longer a plain text field. It is an entity selector, so you can choose multiple Gmail/Google Calendar entities directly from the UI.
+
+Recommended selection examples:
+
+```text
+calendar.family
+calendar.sdh7707_gmail_com
+sensor.calendar_gamil
+sensor.calendar_family
+```
+
+Legacy comma text values from older versions are still accepted internally.
 
 ## Important
 
