@@ -1,0 +1,89 @@
+{
+  "title": "Family Schedule Advisor",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Family Schedule Advisor",
+        "description": "Calendar based departure and outfit advisor using transit duration, weather, and Ollama.",
+        "data": {
+          "calendar_entities": "Calendar or sensor entities",
+          "origin_address": "Origin address",
+          "google_api_key": "Google Directions API key",
+          "ollama_url": "Ollama URL",
+          "ollama_model": "Ollama model",
+          "prepare_minutes": "Preparation margin minutes",
+          "arrival_margin_minutes": "Arrival margin minutes",
+          "lookahead_hours": "Lookahead hours",
+          "min_event_hour": "Minimum event hour",
+          "max_event_hour": "Maximum event hour",
+          "enable_ai_destination": "Use AI destination extraction",
+          "notify_script": "Notify script",
+          "tts_target": "TTS target",
+          "tts_service": "TTS service",
+          "tts_speed": "TTS speed",
+          "tts_pitch": "TTS pitch",
+          "weather_rain": "Rain probability sensor",
+          "weather_feels_like": "Feels like temperature sensor",
+          "weather_temp": "Current temperature sensor",
+          "weather_humidity": "Humidity sensor",
+          "weather_wind": "Wind sensor",
+          "weather_sky": "Sky condition sensor",
+          "weather_dust": "Fine dust sensor",
+          "weather_uv": "UV sensor",
+          "weather_apparent": "Apparent temperature sensor"
+        }
+      }
+    },
+    "error": {
+      "required": "Required field."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "status": {
+        "name": "Status"
+      },
+      "next_event": {
+        "name": "Next event"
+      },
+      "event_time": {
+        "name": "Event time"
+      },
+      "destination": {
+        "name": "Destination"
+      },
+      "transit_duration": {
+        "name": "Transit duration"
+      },
+      "departure_time": {
+        "name": "Recommended departure time"
+      },
+      "notify_time": {
+        "name": "Recommended notification time"
+      },
+      "route_status": {
+        "name": "Route status"
+      },
+      "outfit_message": {
+        "name": "Outfit message"
+      },
+      "recognized_event": {
+        "name": "Recognized event"
+      },
+      "last_action": {
+        "name": "Last action"
+      },
+      "last_notify_result": {
+        "name": "Last notification result"
+      }
+    },
+    "button": {
+      "recalculate": {
+        "name": "Recalculate"
+      },
+      "test_notify": {
+        "name": "Test notification"
+      }
+    }
+  }
+}
