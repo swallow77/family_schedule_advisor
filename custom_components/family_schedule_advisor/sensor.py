@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription
+from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -82,8 +82,12 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
             return {
                 "event_title": data.get("event_title"),
                 "event_source": data.get("event_source"),
+                "event_location": data.get("event_location"),
+                "event_description": data.get("event_description"),
                 "event_time": data.get("event_time"),
                 "raw_event_state": data.get("raw_event_state"),
+                "destination": data.get("destination"),
+                "destination_source": data.get("destination_source"),
                 "checked_entities": data.get("checked_entities"),
                 "candidate_count": data.get("candidate_count"),
                 "accepted_candidate_count": data.get("accepted_candidate_count"),
@@ -103,8 +107,11 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
             "recognized_event": data.get("recognized_event_text"),
             "raw_event_state": data.get("raw_event_state"),
             "event_source": data.get("event_source"),
+            "event_location": data.get("event_location"),
+            "event_description": data.get("event_description"),
             "event_time": data.get("event_time"),
             "destination": data.get("destination"),
+            "destination_source": data.get("destination_source"),
             "departure_time": data.get("departure_time"),
             "notify_time": data.get("notify_time"),
             "route_status": data.get("route_status"),
