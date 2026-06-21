@@ -65,10 +65,11 @@ async def async_send_universal_notify(
     speed: float,
     pitch: float,
 ) -> None:
-    """Call the configured notify script and keep the task alive during media play."""
+    """Call the configured notify script and wait like a Home Assistant automation."""
     domain, service = _parse_script(notify_script)
     data = {
         "message": message,
+        "tts": True,
         "tts_target": tts_target,
         "tts_service": tts_service,
         "tts_options": {
@@ -76,7 +77,7 @@ async def async_send_universal_notify(
             "pitch": pitch,
         },
     }
-    await hass.services.async_call(domain, service, data, blocking=False)
+    await hass.services.async_call(domain, service, data, blocking=True)
     if tts_target:
         started = await _wait_for_media_state(hass, tts_target, "playing", 30)
         if started:
