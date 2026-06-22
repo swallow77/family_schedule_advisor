@@ -73,6 +73,14 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
     def native_value(self) -> Any:
         """Return native value."""
         data = self.coordinator.data or {}
+        if self.entity_description.key == "route_summary":
+            steps = data.get("route_steps") or []
+            duration = data.get("transit_duration_text") or ""
+            if steps:
+                return f"{len(steps)}단계" + (f" / {duration}" if duration else "")
+            if data.get("route_status") == "OK":
+                return duration or "경로 상세 없음"
+            return "정보 없음"
         return data.get(self.entity_description.value_key, "")
 
     @property
@@ -105,6 +113,7 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
             }
         if self.entity_description.key == "route_summary":
             return {
+                "route_summary": data.get("route_summary"),
                 "route_steps": data.get("route_steps"),
                 "start_address": data.get("start_address"),
                 "end_address": data.get("end_address"),
