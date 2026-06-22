@@ -28,6 +28,7 @@ SENSORS: tuple[AdvisorSensorDescription, ...] = (
     AdvisorSensorDescription(key="event_time", translation_key="event_time", value_key="event_time_text", icon="mdi:clock-outline"),
     AdvisorSensorDescription(key="destination", translation_key="destination", value_key="destination", icon="mdi:map-marker"),
     AdvisorSensorDescription(key="transit_duration", translation_key="transit_duration", value_key="transit_duration_text", icon="mdi:train-car"),
+    AdvisorSensorDescription(key="route_summary", translation_key="route_summary", value_key="route_summary", icon="mdi:map-marker-path"),
     AdvisorSensorDescription(key="departure_time", translation_key="departure_time", value_key="departure_time_text", icon="mdi:walk"),
     AdvisorSensorDescription(key="notify_time", translation_key="notify_time", value_key="notify_time_text", icon="mdi:bell-ring-outline"),
     AdvisorSensorDescription(key="route_status", translation_key="route_status", value_key="route_status", icon="mdi:map-check"),
@@ -88,6 +89,8 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
                 "raw_event_state": data.get("raw_event_state"),
                 "destination": data.get("destination"),
                 "destination_source": data.get("destination_source"),
+                "route_summary": data.get("route_summary"),
+                "route_steps": data.get("route_steps"),
                 "checked_entities": data.get("checked_entities"),
                 "candidate_count": data.get("candidate_count"),
                 "accepted_candidate_count": data.get("accepted_candidate_count"),
@@ -99,6 +102,14 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
                 "last_action": data.get("last_action"),
                 "last_action_time": data.get("last_action_time"),
                 "last_notify_result": data.get("last_notify_result"),
+            }
+        if self.entity_description.key == "route_summary":
+            return {
+                "route_steps": data.get("route_steps"),
+                "start_address": data.get("start_address"),
+                "end_address": data.get("end_address"),
+                "route_status": data.get("route_status"),
+                "route_error": data.get("route_error"),
             }
         if self.entity_description.key != "status":
             return None
@@ -116,6 +127,8 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
             "notify_time": data.get("notify_time"),
             "route_status": data.get("route_status"),
             "route_error": data.get("route_error"),
+            "route_summary": data.get("route_summary"),
+            "route_steps": data.get("route_steps"),
             "start_address": data.get("start_address"),
             "end_address": data.get("end_address"),
             "last_notify_result": data.get("last_notify_result"),
@@ -128,5 +141,4 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
             "max_event_hour": data.get("max_event_hour"),
             "last_action": data.get("last_action"),
             "last_action_time": data.get("last_action_time"),
-            "last_notify_result": data.get("last_notify_result"),
         }
