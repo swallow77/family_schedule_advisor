@@ -74,50 +74,23 @@
   },
   "entity": {
     "sensor": {
-      "status": {
-        "name": "상태"
-      },
-      "next_event": {
-        "name": "다음 일정"
-      },
-      "event_time": {
-        "name": "일정 시간"
-      },
-      "destination": {
-        "name": "목적지"
-      },
-      "transit_duration": {
-        "name": "대중교통 소요시간"
-      },
-      "departure_time": {
-        "name": "추천 출발 시간"
-      },
-      "notify_time": {
-        "name": "추천 준비 알림 시간"
-      },
-      "route_status": {
-        "name": "경로 상태"
-      },
-      "outfit_message": {
-        "name": "옷차림 안내문"
-      },
-      "recognized_event": {
-        "name": "인식한 일정"
-      },
-      "last_action": {
-        "name": "마지막 동작"
-      },
-      "last_notify_result": {
-        "name": "마지막 알림 결과"
-      }
+      "status": {"name": "상태"},
+      "next_event": {"name": "다음 일정"},
+      "event_time": {"name": "일정 시간"},
+      "destination": {"name": "목적지"},
+      "transit_duration": {"name": "대중교통 소요시간"},
+      "route_summary": {"name": "대중교통 이용방법"},
+      "departure_time": {"name": "추천 출발 시간"},
+      "notify_time": {"name": "추천 준비 알림 시간"},
+      "route_status": {"name": "경로 상태"},
+      "outfit_message": {"name": "옷차림 안내문"},
+      "recognized_event": {"name": "인식한 일정"},
+      "last_action": {"name": "마지막 동작"},
+      "last_notify_result": {"name": "마지막 알림 결과"}
     },
     "button": {
-      "recalculate": {
-        "name": "일정 다시 계산"
-      },
-      "test_notify": {
-        "name": "테스트 알림"
-      }
+      "recalculate": {"name": "일정 다시 계산"},
+      "test_notify": {"name": "테스트 알림"}
     }
   }
 }
