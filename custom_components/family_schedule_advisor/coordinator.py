@@ -69,12 +69,7 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     """Main coordinator."""
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        super().__init__(
-            hass,
-            _LOGGER,
-            name=DOMAIN,
-            update_interval=None,
-        )
+        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=None)
         self.entry = entry
         self.session = async_get_clientsession(hass)
         self._state_unsubs: list[CALLBACK_TYPE] = []
@@ -176,18 +171,9 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         lookahead_hours = int(cfg.get(CONF_LOOKAHEAD_HOURS, DEFAULT_LOOKAHEAD_HOURS))
         min_hour = int(cfg.get(CONF_MIN_EVENT_HOUR, DEFAULT_MIN_EVENT_HOUR))
         max_hour = int(cfg.get(CONF_MAX_EVENT_HOUR, DEFAULT_MAX_EVENT_HOUR))
-        candidates = await async_get_event_candidates(
-            self.hass,
-            entities,
-            lookahead_hours,
-            min_hour,
-            max_hour,
-        )
+        candidates = await async_get_event_candidates(self.hass, entities, lookahead_hours, min_hour, max_hour)
         candidates = sorted(candidates, key=self._candidate_sort_key)
-        accepted = sorted(
-            [candidate for candidate in candidates if candidate.accepted],
-            key=self._candidate_sort_key,
-        )
+        accepted = sorted([candidate for candidate in candidates if candidate.accepted], key=self._candidate_sort_key)
         first_candidate = candidates[0] if candidates else None
 
         base_debug = {
@@ -220,6 +206,8 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "destination": fallback_destination,
                     "destination_source": "calendar_location" if event.location else "event_title",
                     "route_status": "SKIPPED",
+                    "route_summary": "",
+                    "route_steps": [],
                     "message": f"일정은 인식했지만 알림 대상에서 제외되었습니다. 사유: {first_candidate.reject_reason}",
                 }
             return {
@@ -233,6 +221,8 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "event_description": "",
                 "destination_source": "",
                 "route_status": "",
+                "route_summary": "",
+                "route_steps": [],
                 "message": "예정된 일정이 없습니다.",
             }
 
@@ -249,6 +239,8 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         transit_text = ""
         start_address = ""
         end_address = ""
+        route_summary = ""
+        route_steps: list[str] = []
 
         if destination:
             result = await async_get_transit_duration(
@@ -265,6 +257,8 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 transit_text = result.duration_text
                 start_address = result.start_address
                 end_address = result.end_address
+                route_summary = result.route_summary
+                route_steps = result.route_steps
 
         if transit_seconds > 0:
             departure_time = arrival_target - timedelta(seconds=transit_seconds)
@@ -293,6 +287,8 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "transit_duration_text": transit_text,
             "route_status": route_status,
             "route_error": route_error,
+            "route_summary": route_summary,
+            "route_steps": route_steps,
             "start_address": start_address,
             "end_address": end_address,
             "departure_time": departure_time.isoformat(),
@@ -368,8 +364,6 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         data = dict(self.data or {})
         event_key = data.get("event_key")
 
-        # 테스트 알림은 필터링된 일정도 확인 가능해야 한다.
-        # 기존에는 event_key가 없으면 조용히 종료되어 버튼이 아무 반응 없는 것처럼 보였다.
         if not event_key and test and data.get("event_title"):
             event_key = f"test:{data.get('event_source','')}:{data.get('event_time','')}:{data.get('event_title','')}"
             data["event_key"] = event_key
@@ -380,7 +374,6 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not event_key:
             self._mark_action("테스트 알림 실패" if test else "자동 알림 실패", "인식된 일정이 없어 알림을 보낼 수 없습니다")
             return
-
         if not test and event_key in self._last_notified:
             self._mark_action("자동 알림 건너뜀", "이미 발송한 일정입니다")
             return
