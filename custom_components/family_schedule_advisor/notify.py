@@ -27,13 +27,19 @@ async def async_send_universal_notify(
     speed: float,
     pitch: float,
 ) -> None:
-    """Call the configured notify script using the same fire-and-forget style as a manual service call."""
+    """Call the configured notify script with the configured TTS options."""
     domain, service = _parse_script(notify_script)
+    options: dict[str, float] = {}
+    if speed:
+        options["speed"] = float(speed)
+    if pitch:
+        options["pitch"] = float(pitch)
+
     data = {
         "message": message,
         "tts": True,
         "tts_target": tts_target,
         "tts_service": tts_service,
-        "tts_options": {},
+        "tts_options": options,
     }
     await hass.services.async_call(domain, service, data, blocking=False)
