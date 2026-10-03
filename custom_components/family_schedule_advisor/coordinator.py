@@ -88,6 +88,9 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_notify_result = ""
         self._started = False
         self._stopped = False
+        self._state_save_lock = asyncio.Lock()
+        self._last_message = ""
+        self._last_message_event_key = ""
 
     @property
     def config(self) -> dict[str, Any]:
@@ -229,16 +232,17 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._messages = {key: value for key, value in self._messages.items() if key in new_plans}
         if not plans and not new_plans and candidates:
             event = candidates[0].event
-            return {
-                **self._view(),
-                "status": "필터됨",
-                "event_title": event.title,
-                "recognized_event_text": format_compact_event(event),
-                "event_time": event.start.isoformat(),
-                "event_source": event.source,
-                "raw_event_state": event.raw_text,
-                "message": candidates[0].reject_reason,
-            }
+            self._base_debug.update(
+                {
+                    "status": "필터됨",
+                    "event_title": event.title,
+                    "recognized_event_text": format_compact_event(event),
+                    "event_time": event.start.isoformat(),
+                    "event_source": event.source,
+                    "raw_event_state": event.raw_text,
+                    "message": candidates[0].reject_reason,
+                }
+            )
         return self._view()
 
     async def _async_build_plan(self, event, profile):
@@ -459,6 +463,13 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Automatic notifications never wait for an LLM at their due time.
             plan.weather = self._weather_for_plan(plan)
             message = fallback_message(plan, stage)
+            if (
+                not test
+                and stage == "prepare"
+                and plan.notify_time
+                and dt_util.now() - plan.notify_time > timedelta(minutes=1)
+            ):
+                message = "준비 알림 시각이 지나 지금 안내합니다. " + message
             cached = self._messages.get(key)
             if stage == "prepare" and cached and cached[0] == self._signature(plan):
                 message += " " + cached[1]
@@ -550,8 +561,8 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
             if key in self._plans:
                 self._messages.setdefault(key, ("", ""))
-                self._base_debug["last_message_event_key"] = key
-                self._base_debug["last_message"] = message
+                self._last_message_event_key = key
+                self._last_message = message
             self._last_notify_result = result
             self._last_action = "테스트 알림 완료" if test else "자동 알림 완료"
         finally:
@@ -572,7 +583,7 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "snooze",
                     f"{self.config.get(c.CONF_SNOOZE_MINUTES, c.DEFAULT_SNOOZE_MINUTES)}분 뒤 다시",
                 ),
-                ("skip", "오늘 건너뛰기"),
+                ("skip", "이 일정 건너뛰기"),
             )
         ]
 
@@ -651,6 +662,10 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._mark_action(labels[command], plan.event.title)
 
     async def _save_state(self):
+        async with self._state_save_lock:
+            await self._async_save_snapshot()
+
+    async def _async_save_snapshot(self):
         cutoff = dt_util.now() - timedelta(days=14)
         for values in (self._sent, self._done):
             for key, timestamp in list(values.items()):
@@ -663,9 +678,9 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._snoozed.pop(key, None)
         await self._store.async_save(
             {
-                "sent": self._sent,
-                "done": self._done,
-                "snoozed": self._snoozed,
+                "sent": dict(self._sent),
+                "done": dict(self._done),
+                "snoozed": dict(self._snoozed),
                 "legacy_notified": self._legacy_notified[-50:],
             }
         )
@@ -720,9 +735,7 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             }
         )
         data["outfit_message"] = (
-            self._base_debug.get("last_message", "")
-            if selected and self._base_debug.get("last_message_event_key") == selected.key
-            else ""
+            self._last_message if selected and self._last_message_event_key == selected.key else ""
         )
         return data
 

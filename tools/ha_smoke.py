@@ -8,6 +8,8 @@ from tempfile import TemporaryDirectory
 from types import MappingProxyType
 from unittest.mock import AsyncMock, patch
 
+import aiohttp
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
@@ -66,7 +68,12 @@ async def runtime_check():
             discovery_keys=MappingProxyType({}),
             subentries_data=None,
         )
-        instance = coordinator.FamilyScheduleAdvisorCoordinator(hass, entry)
+        # The HTTP boundary is isolated; initializing HA's network/zeroconf
+        # stack is outside an import/configuration/coordinator smoke check.
+        with patch.object(
+            coordinator, "async_get_clientsession", return_value=aiohttp.ClientSession()
+        ):
+            instance = coordinator.FamilyScheduleAdvisorCoordinator(hass, entry)
         event = EventInfo(
             "smoke",
             "온라인 회의",
