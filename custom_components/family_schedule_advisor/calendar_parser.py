@@ -1,10 +1,12 @@
 """Calendar and sensor parsing helpers."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import timedelta
+import hashlib
 import logging
 import re
+from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -33,6 +35,8 @@ class EventInfo:
     description: str = ""
     source: str = ""
     raw_text: str = ""
+    sources: tuple[str, ...] = ()
+    legacy_keys: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -60,6 +64,8 @@ def _parse_datetime(value: Any):
     if not value:
         return None
     if hasattr(value, "tzinfo"):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE)
         return dt_util.as_local(value)
     parsed = dt_util.parse_datetime(str(value))
     if parsed is None:
@@ -69,8 +75,10 @@ def _parse_datetime(value: Any):
     return dt_util.as_local(parsed)
 
 
-def _event_key(source: str, start, title: str) -> str:
-    return f"{source}|{start.isoformat()}|{title}"[:240]
+def _event_key(source: str, start, title: str, location: str = "") -> str:
+    normalized_title = " ".join(title.casefold().split())
+    fingerprint = f"{start.isoformat()}|{normalized_title}|{' '.join(location.casefold().split())}"
+    return hashlib.sha256(fingerprint.encode()).hexdigest()[:32]
 
 
 def _parse_sensor_entity(hass: HomeAssistant, entity_id: str) -> EventInfo | None:
@@ -93,7 +101,11 @@ def _parse_sensor_entity(hass: HomeAssistant, entity_id: str) -> EventInfo | Non
     if start is None:
         match = SENSOR_RE.search(str(raw))
         if match is None:
-            _LOGGER.debug("Calendar sensor %s did not match supported date format: %s", entity_id, raw)
+            _LOGGER.debug(
+                "Calendar sensor %s did not match supported date format: %s",
+                entity_id,
+                raw,
+            )
             return None
         now = dt_util.now()
         year_raw = match.group("year")
@@ -105,7 +117,15 @@ def _parse_sensor_entity(hass: HomeAssistant, entity_id: str) -> EventInfo | Non
         parsed_title = match.group("title").strip()
         title = title or parsed_title
         try:
-            start = now.replace(year=year, month=month, day=day, hour=hour, minute=minute, second=0, microsecond=0)
+            start = now.replace(
+                year=year,
+                month=month,
+                day=day,
+                hour=hour,
+                minute=minute,
+                second=0,
+                microsecond=0,
+            )
         except ValueError as err:
             _LOGGER.debug("Calendar sensor %s has invalid date %s: %s", entity_id, raw, err)
             return None
@@ -117,7 +137,7 @@ def _parse_sensor_entity(hass: HomeAssistant, entity_id: str) -> EventInfo | Non
 
     title = title or str(raw).strip()
     return EventInfo(
-        key=_event_key(entity_id, start, title),
+        key=_event_key(entity_id, start, title, location),
         title=title,
         start=start,
         end=end,
@@ -125,6 +145,8 @@ def _parse_sensor_entity(hass: HomeAssistant, entity_id: str) -> EventInfo | Non
         description=description,
         source=entity_id,
         raw_text=str(raw).strip(),
+        sources=(entity_id,),
+        legacy_keys=(f"{entity_id}|{start.isoformat()}|{title}"[:240],),
     )
 
 
@@ -146,11 +168,13 @@ def _parse_calendar_event(entity_id: str, item: dict[str, Any]) -> EventInfo | N
     else:
         raw_end = end
 
+    if item.get("status") == "cancelled":
+        return None
     title = str(item.get("summary") or item.get("title") or item.get("message") or "일정").strip()
     location = str(item.get("location") or item.get("place") or item.get("where") or "").strip()
     description = str(item.get("description") or item.get("desc") or "").strip()
     return EventInfo(
-        key=_event_key(entity_id, start_dt, title),
+        key=_event_key(entity_id, start_dt, title, location),
         title=title,
         start=start_dt,
         end=_parse_datetime(raw_end),
@@ -158,6 +182,8 @@ def _parse_calendar_event(entity_id: str, item: dict[str, Any]) -> EventInfo | N
         description=description,
         source=entity_id,
         raw_text=str(title).strip(),
+        sources=(entity_id,),
+        legacy_keys=(f"{entity_id}|{start_dt.isoformat()}|{title}"[:240],),
     )
 
 
@@ -166,7 +192,13 @@ def _validate_event(event: EventInfo, now, until, min_hour: int, max_hour: int) 
         return EventCandidate(event, False, "지난 일정")
     if event.start > until:
         return EventCandidate(event, False, "조회 범위 초과")
-    if not (min_hour <= int(event.start.hour) <= max_hour):
+    hour = int(event.start.hour)
+    allowed = (
+        min_hour <= hour <= max_hour
+        if min_hour <= max_hour
+        else hour >= min_hour or hour <= max_hour
+    )
+    if not allowed:
         return EventCandidate(event, False, f"허용 시간대 제외 {min_hour}시부터 {max_hour}시")
     return EventCandidate(event, True, "")
 
@@ -196,8 +228,8 @@ async def _async_call_calendar_get_events(
     except TypeError:
         # Older HA versions may not support target in async_call.
         pass
-    except (HomeAssistantError, ValueError) as err:
-        _LOGGER.warning("calendar.get_events target call failed: %s", err)
+    except (HomeAssistantError, ValueError):
+        raise
 
     try:
         response = await hass.services.async_call(
@@ -212,8 +244,7 @@ async def _async_call_calendar_get_events(
         )
         return response or {}
     except (HomeAssistantError, ValueError, TypeError) as err:
-        _LOGGER.warning("calendar.get_events legacy call failed: %s", err)
-        return {}
+        raise HomeAssistantError(f"Calendar event query failed: {err}") from err
 
 
 async def async_get_event_candidates(
@@ -222,6 +253,7 @@ async def async_get_event_candidates(
     lookahead_hours: int,
     min_hour: int,
     max_hour: int,
+    errors: list[str] | None = None,
 ) -> list[EventCandidate]:
     """Get parsed event candidates from calendar and sensor entities."""
     now = dt_util.now()
@@ -231,25 +263,69 @@ async def async_get_event_candidates(
     sensor_entities = [e for e in entity_ids if not e.startswith("calendar.")]
     calendar_entities = [e for e in entity_ids if e.startswith("calendar.")]
 
-    calendar_events: list[EventInfo] = []
-    if calendar_entities:
-        response = await _async_call_calendar_get_events(hass, calendar_entities, now, until)
-        for entity_id, payload in response.items():
-            for item in payload.get("events", []):
+    failures: list[str] = []
+    for entity_id in calendar_entities:
+        try:
+            response = await _async_call_calendar_get_events(hass, [entity_id], now, until)
+            for item in (response.get(entity_id) or {}).get("events", []):
                 event = _parse_calendar_event(entity_id, item)
                 if event is not None:
-                    calendar_events.append(event)
+                    parsed_events.append(event)
+        except (HomeAssistantError, ValueError, TypeError) as err:
+            failures.append(entity_id)
+            _LOGGER.warning("Calendar %s could not be read: %s", entity_id, err)
+    for entity_id in sensor_entities:
+        event = _parse_sensor_entity(hass, entity_id)
+        if event is not None:
+            parsed_events.append(event)
+    if errors is not None:
+        errors.extend(failures)
+    if failures and len(failures) == len(calendar_entities) and not parsed_events:
+        raise HomeAssistantError("Calendar query failed: " + ", ".join(failures))
 
-    if calendar_events:
-        parsed_events.extend(calendar_events)
-    else:
-        for entity_id in sensor_entities:
-            event = _parse_sensor_entity(hass, entity_id)
-            if event is not None:
-                parsed_events.append(event)
+    # Shared appointments from multiple calendars/sensors are one event. Preserve
+    # every source so each family's profile can still match the shared event.
+    locations: dict[str, set[str]] = {}
+    for event in parsed_events:
+        group = _event_key("", event.start, event.title)
+        if event.location:
+            locations.setdefault(group, set()).add(" ".join(event.location.casefold().split()))
+    merged: dict[str, EventInfo] = {}
+    for event in parsed_events:
+        group = _event_key("", event.start, event.title)
+        known = locations.get(group, set())
+        # A sensor lacking location can enrich one unambiguous calendar event.
+        # Distinct locations at the same time/title remain separate appointments.
+        if not event.location and len(known) == 1:
+            event.key = _event_key("", event.start, event.title, next(iter(known)))
+        previous = merged.get(event.key)
+        if previous is None:
+            merged[event.key] = event
+            continue
+        sources = tuple(dict.fromkeys((*previous.sources, *event.sources)))
+        legacy_keys = tuple(dict.fromkeys((*previous.legacy_keys, *event.legacy_keys)))
+
+        def rank(item):
+            return bool(item.location), bool(item.description), item.source.startswith("calendar.")
+
+        richer = event if rank(event) > rank(previous) else previous
+        richer.location = richer.location or previous.location or event.location
+        richer.description = richer.description or previous.description or event.description
+        richer.end = richer.end or previous.end or event.end
+        richer.sources = sources
+        richer.legacy_keys = legacy_keys
+        richer.key = event.key
+        merged[event.key] = richer
+    parsed_events = list(merged.values())
 
     candidates = [_validate_event(event, now, until, min_hour, max_hour) for event in parsed_events]
-    candidates.sort(key=lambda item: (item.event.start, 0 if item.event.location else 1, item.event.source))
+    candidates.sort(
+        key=lambda item: (
+            item.event.start,
+            0 if item.event.location else 1,
+            item.event.source,
+        )
+    )
     return candidates
 
 
@@ -261,5 +337,7 @@ async def async_get_events(
     max_hour: int,
 ) -> list[EventInfo]:
     """Get accepted upcoming events from calendar and sensor entities."""
-    candidates = await async_get_event_candidates(hass, entity_ids, lookahead_hours, min_hour, max_hour)
+    candidates = await async_get_event_candidates(
+        hass, entity_ids, lookahead_hours, min_hour, max_hour
+    )
     return [candidate.event for candidate in candidates if candidate.accepted]

@@ -9,6 +9,56 @@ recalculate:
       selector:
         text:
 
+mark_prepared:
+  name: Mark prepared
+  description: Complete the preparation reminder for the shown or specified event.
+  fields: &event_fields
+    entry_id:
+      name: Entry ID
+      required: false
+      selector:
+        text:
+    event_key:
+      name: Event key
+      description: Event key from the status or schedule sensor. Omit for the currently shown event.
+      required: false
+      selector:
+        text:
+    stage:
+      name: Reminder stage
+      required: false
+      selector:
+        select:
+          options:
+            - prepare
+            - departure
+
+mark_departed:
+  name: Mark departed
+  description: Complete every remaining reminder for this event.
+  fields: *event_fields
+
+skip_event:
+  name: Skip event reminders
+  description: Skip this event without affecting other events.
+  fields: *event_fields
+
+snooze:
+  name: Snooze reminder
+  description: Resend a reminder after the configured delay, before the event starts.
+  fields:
+    <<: *event_fields
+    minutes:
+      name: Delay in minutes
+      description: Optional override of the configured snooze delay.
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          mode: box
+
 test_notify:
   name: Test family departure notification
   description: Generate and send a test notification for the current next event.

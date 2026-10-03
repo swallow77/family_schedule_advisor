@@ -1,4 +1,5 @@
 """Button platform for Family Schedule Advisor."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,8 +22,39 @@ class AdvisorButtonDescription(ButtonEntityDescription):
 
 
 BUTTONS: tuple[AdvisorButtonDescription, ...] = (
-    AdvisorButtonDescription(key="recalculate", translation_key="recalculate", action="recalculate", icon="mdi:reload"),
-    AdvisorButtonDescription(key="test_notify", translation_key="test_notify", action="test_notify", icon="mdi:speaker-message"),
+    AdvisorButtonDescription(
+        key="recalculate",
+        translation_key="recalculate",
+        action="recalculate",
+        icon="mdi:reload",
+    ),
+    AdvisorButtonDescription(
+        key="test_notify",
+        translation_key="test_notify",
+        action="test_notify",
+        icon="mdi:speaker-message",
+    ),
+    AdvisorButtonDescription(
+        key="mark_prepared",
+        translation_key="mark_prepared",
+        action="prepared",
+        icon="mdi:check-circle",
+    ),
+    AdvisorButtonDescription(
+        key="mark_departed",
+        translation_key="mark_departed",
+        action="departed",
+        icon="mdi:walk",
+    ),
+    AdvisorButtonDescription(
+        key="snooze", translation_key="snooze", action="snooze", icon="mdi:bell-sleep"
+    ),
+    AdvisorButtonDescription(
+        key="skip_event",
+        translation_key="skip_event",
+        action="skip",
+        icon="mdi:calendar-remove",
+    ),
 )
 
 
@@ -63,3 +95,5 @@ class AdvisorButton(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], ButtonE
             await self.coordinator.async_manual_recalculate()
         elif self.entity_description.action == "test_notify":
             await self.coordinator.async_generate_and_notify(test=True)
+        else:
+            await self.coordinator.async_event_action(self.entity_description.action)
