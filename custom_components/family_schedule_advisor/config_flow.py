@@ -35,6 +35,7 @@ INTEGER_KEYS = {
     c.CONF_QUIET_START,
     c.CONF_QUIET_END,
     c.CONF_SNOOZE_MINUTES,
+    c.CONF_TELEGRAM_REQUEST_HOURS,
 }
 
 
@@ -249,8 +250,49 @@ class FamilyScheduleAdvisorOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input=None):
         return self.async_show_menu(
             step_id="init",
-            menu_options=["general", "places", "profiles", "notifications", "weather"],
+            menu_options=["general", "places", "profiles", "notifications", "weather", "telegram"],
         )
+
+    async def async_step_telegram(self, user_input=None):
+        defaults = {**self.defaults, **(user_input or {})}
+        errors = {}
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    c.CONF_TELEGRAM_LOCATION_ENABLED,
+                    default=defaults.get(c.CONF_TELEGRAM_LOCATION_ENABLED, False),
+                ): bool,
+                _optional_entity(c.CONF_TELEGRAM_NOTIFY_ENTITY, defaults): _entities(["notify"]),
+                _optional_entity(c.CONF_TELEGRAM_EVENT_ENTITY, defaults): _entities(["event"]),
+                vol.Required(
+                    c.CONF_TELEGRAM_WRITE_CALENDAR,
+                    default=defaults.get(c.CONF_TELEGRAM_WRITE_CALENDAR, False),
+                ): bool,
+                vol.Required(
+                    c.CONF_TELEGRAM_REQUEST_HOURS,
+                    default=defaults.get(c.CONF_TELEGRAM_REQUEST_HOURS, 24),
+                ): _number(1, 72),
+            }
+        )
+        if user_input is not None:
+            try:
+                values = _normalize_user_input(user_input)
+                if values[c.CONF_TELEGRAM_LOCATION_ENABLED]:
+                    from .telegram_location import resolve_target
+
+                    resolve_target(self.hass, values)
+                return self._save(
+                    {
+                        **values,
+                        c.CONF_TELEGRAM_NOTIFY_ENTITY: values.get(
+                            c.CONF_TELEGRAM_NOTIFY_ENTITY, ""
+                        ),
+                        c.CONF_TELEGRAM_EVENT_ENTITY: values.get(c.CONF_TELEGRAM_EVENT_ENTITY, ""),
+                    }
+                )
+            except (ValueError, TypeError, KeyError, vol.Invalid):
+                errors["base"] = "telegram_target"
+        return self.async_show_form(step_id="telegram", data_schema=schema, errors=errors)
 
     async def _form(self, step, schema, user_input):
         errors = {}

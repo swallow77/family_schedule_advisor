@@ -6,7 +6,7 @@ from homeassistant.const import Platform
 
 DOMAIN = "family_schedule_advisor"
 NAME = "Family Schedule Advisor"
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
 
@@ -69,6 +69,11 @@ CONF_SNOOZE_MINUTES = "snooze_minutes"
 CONF_WEATHER_ENTITY = "weather_entity"
 CONF_PLACE_ALIASES = "place_aliases"
 CONF_FAMILY_PROFILES = "family_profiles"
+CONF_TELEGRAM_LOCATION_ENABLED = "telegram_location_enabled"
+CONF_TELEGRAM_NOTIFY_ENTITY = "telegram_notify_entity"
+CONF_TELEGRAM_EVENT_ENTITY = "telegram_event_entity"
+CONF_TELEGRAM_WRITE_CALENDAR = "telegram_write_calendar"
+CONF_TELEGRAM_REQUEST_HOURS = "telegram_request_hours"
 DEFAULT_TRAVEL_MODE = "transit"
 DEFAULT_ROUTE_PROVIDER = "directions"
 DEFAULT_POLL_MINUTES = 5

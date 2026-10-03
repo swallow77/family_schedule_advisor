@@ -277,6 +277,8 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
             "pending_reminders": data.get("pending_reminders", 0),
             "calendar_errors": data.get("calendar_errors", []),
             "forecast_error": data.get("forecast_error", ""),
+            "telegram_error": data.get("telegram_error", ""),
+            "pending_location_requests": data.get("pending_location_requests", 0),
             "plan_limit_exceeded": data.get("plan_limit_exceeded", 0),
             "person_name": data.get("person_name"),
         }

@@ -134,7 +134,7 @@ def test_manifest_and_translations_are_consistent():
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     from custom_components.family_schedule_advisor.const import VERSION
 
-    assert manifest["version"] == VERSION == "0.4.0"
+    assert manifest["version"] == VERSION == "0.5.0"
     translations = [
         json.loads((root / "translations" / f"{lang}.json").read_text(encoding="utf-8"))
         for lang in ("en", "ko")
@@ -142,4 +142,14 @@ def test_manifest_and_translations_are_consistent():
     for data in translations:
         assert {item.translation_key for item in SENSORS} <= data["entity"]["sensor"].keys()
         assert "whole_number" in data["options"]["error"]
+        menus = data["options"]["step"]["init"]["menu_options"]
+        assert set(menus) == {
+            "general",
+            "places",
+            "profiles",
+            "notifications",
+            "weather",
+            "telegram",
+        }
+        assert all(menus.values())
     assert translations[0] == json.loads((root / "strings.json").read_text(encoding="utf-8"))
