@@ -1,14 +1,20 @@
 """Sensor platform for Family Schedule Advisor."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity, SensorEntityDescription
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .coordinator import FamilyScheduleAdvisorCoordinator
@@ -22,19 +28,108 @@ class AdvisorSensorDescription(SensorEntityDescription):
 
 
 SENSORS: tuple[AdvisorSensorDescription, ...] = (
-    AdvisorSensorDescription(key="status", translation_key="status", value_key="status", icon="mdi:calendar-clock"),
-    AdvisorSensorDescription(key="recognized_event", translation_key="recognized_event", value_key="recognized_event_text", icon="mdi:clipboard-text-clock"),
-    AdvisorSensorDescription(key="next_event", translation_key="next_event", value_key="event_title", icon="mdi:calendar-star"),
-    AdvisorSensorDescription(key="event_time", translation_key="event_time", value_key="event_time_text", icon="mdi:clock-outline"),
-    AdvisorSensorDescription(key="destination", translation_key="destination", value_key="destination", icon="mdi:map-marker"),
-    AdvisorSensorDescription(key="transit_duration", translation_key="transit_duration", value_key="transit_duration_text", icon="mdi:train-car"),
-    AdvisorSensorDescription(key="route_summary", translation_key="route_summary", value_key="route_summary", icon="mdi:map-marker-path"),
-    AdvisorSensorDescription(key="departure_time", translation_key="departure_time", value_key="departure_time_text", icon="mdi:walk"),
-    AdvisorSensorDescription(key="notify_time", translation_key="notify_time", value_key="notify_time_text", icon="mdi:bell-ring-outline"),
-    AdvisorSensorDescription(key="route_status", translation_key="route_status", value_key="route_status", icon="mdi:map-check"),
-    AdvisorSensorDescription(key="outfit_message", translation_key="outfit_message", value_key="outfit_message", icon="mdi:hanger"),
-    AdvisorSensorDescription(key="last_action", translation_key="last_action", value_key="last_action", icon="mdi:gesture-tap-button"),
-    AdvisorSensorDescription(key="last_notify_result", translation_key="last_notify_result", value_key="last_notify_result", icon="mdi:message-badge-outline"),
+    AdvisorSensorDescription(
+        key="status",
+        translation_key="status",
+        value_key="status",
+        icon="mdi:calendar-clock",
+    ),
+    AdvisorSensorDescription(
+        key="recognized_event",
+        translation_key="recognized_event",
+        value_key="recognized_event_text",
+        icon="mdi:clipboard-text-clock",
+    ),
+    AdvisorSensorDescription(
+        key="next_event",
+        translation_key="next_event",
+        value_key="event_title",
+        icon="mdi:calendar-star",
+    ),
+    AdvisorSensorDescription(
+        key="event_time",
+        translation_key="event_time",
+        value_key="event_time_text",
+        icon="mdi:clock-outline",
+    ),
+    AdvisorSensorDescription(
+        key="destination",
+        translation_key="destination",
+        value_key="destination",
+        icon="mdi:map-marker",
+    ),
+    AdvisorSensorDescription(
+        key="transit_duration",
+        translation_key="transit_duration",
+        value_key="transit_duration_text",
+        icon="mdi:train-car",
+    ),
+    AdvisorSensorDescription(
+        key="route_summary",
+        translation_key="route_summary",
+        value_key="route_summary",
+        icon="mdi:map-marker-path",
+    ),
+    AdvisorSensorDescription(
+        key="departure_time",
+        translation_key="departure_time",
+        value_key="departure_time_text",
+        icon="mdi:walk",
+    ),
+    AdvisorSensorDescription(
+        key="notify_time",
+        translation_key="notify_time",
+        value_key="notify_time_text",
+        icon="mdi:bell-ring-outline",
+    ),
+    AdvisorSensorDescription(
+        key="route_status",
+        translation_key="route_status",
+        value_key="route_status",
+        icon="mdi:map-check",
+    ),
+    AdvisorSensorDescription(
+        key="outfit_message",
+        translation_key="outfit_message",
+        value_key="outfit_message",
+        icon="mdi:hanger",
+    ),
+    AdvisorSensorDescription(
+        key="last_action",
+        translation_key="last_action",
+        value_key="last_action",
+        icon="mdi:gesture-tap-button",
+    ),
+    AdvisorSensorDescription(
+        key="last_notify_result",
+        translation_key="last_notify_result",
+        value_key="last_notify_result",
+        icon="mdi:message-badge-outline",
+    ),
+    AdvisorSensorDescription(
+        key="today_schedule",
+        translation_key="today_schedule",
+        value_key="today_events",
+        icon="mdi:calendar-today",
+    ),
+    AdvisorSensorDescription(
+        key="schedule_conflicts",
+        translation_key="schedule_conflicts",
+        value_key="conflicts",
+        icon="mdi:calendar-alert",
+    ),
+    AdvisorSensorDescription(
+        key="departure_timestamp",
+        translation_key="departure_timestamp",
+        value_key="departure_time",
+        device_class=SensorDeviceClass.TIMESTAMP,
+    ),
+    AdvisorSensorDescription(
+        key="notify_timestamp",
+        translation_key="notify_timestamp",
+        value_key="notify_time",
+        device_class=SensorDeviceClass.TIMESTAMP,
+    ),
 )
 
 
@@ -73,6 +168,11 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
     def native_value(self) -> Any:
         """Return native value."""
         data = self.coordinator.data or {}
+        if self.entity_description.device_class == SensorDeviceClass.TIMESTAMP:
+            value = data.get(self.entity_description.value_key)
+            return dt_util.parse_datetime(value) if value else None
+        if self.entity_description.key in {"today_schedule", "schedule_conflicts"}:
+            return len(data.get(self.entity_description.value_key) or [])
         if self.entity_description.key == "route_summary":
             steps = data.get("route_steps") or []
             duration = data.get("transit_duration_text") or ""
@@ -81,12 +181,31 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
             if data.get("route_status") == "OK":
                 return duration or "경로 상세 없음"
             return "정보 없음"
-        return data.get(self.entity_description.value_key, "")
+        value = data.get(self.entity_description.value_key, "")
+        return value[:255] if isinstance(value, str) else value
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return attributes for key sensors."""
         data = self.coordinator.data or {}
+        if self.entity_description.key in {"today_schedule", "schedule_conflicts"}:
+            return {
+                "events"
+                if self.entity_description.key == "today_schedule"
+                else "conflicts": data.get(self.entity_description.value_key, []),
+                "upcoming_events": data.get("upcoming_events", []),
+                "pending_reminders": data.get("pending_reminders", 0),
+            }
+        if self.entity_description.key in {
+            "outfit_message",
+            "next_event",
+            "destination",
+            "last_notify_result",
+        }:
+            return {
+                "full_text": data.get(self.entity_description.value_key, ""),
+                "event_key": data.get("event_key"),
+            }
         if self.entity_description.key == "recognized_event":
             return {
                 "event_title": data.get("event_title"),
@@ -107,6 +226,8 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
                 "min_event_hour": data.get("min_event_hour"),
                 "max_event_hour": data.get("max_event_hour"),
                 "message": data.get("message"),
+                "event_sources": data.get("event_sources"),
+                "person_name": data.get("person_name"),
                 "last_action": data.get("last_action"),
                 "last_action_time": data.get("last_action_time"),
                 "last_notify_result": data.get("last_notify_result"),
@@ -119,6 +240,8 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
                 "end_address": data.get("end_address"),
                 "route_status": data.get("route_status"),
                 "route_error": data.get("route_error"),
+                "route_link": data.get("route_link"),
+                "estimated_travel_time": data.get("estimated_travel_time"),
             }
         if self.entity_description.key != "status":
             return None
@@ -150,4 +273,10 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
             "max_event_hour": data.get("max_event_hour"),
             "last_action": data.get("last_action"),
             "last_action_time": data.get("last_action_time"),
+            "plan_count": data.get("plan_count", 0),
+            "pending_reminders": data.get("pending_reminders", 0),
+            "calendar_errors": data.get("calendar_errors", []),
+            "forecast_error": data.get("forecast_error", ""),
+            "plan_limit_exceeded": data.get("plan_limit_exceeded", 0),
+            "person_name": data.get("person_name"),
         }

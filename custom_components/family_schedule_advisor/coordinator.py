@@ -1,483 +1,820 @@
-"""Coordinator for Family Schedule Advisor."""
+"""Track and notify every upcoming family appointment independently."""
+
 from __future__ import annotations
 
 import asyncio
-from datetime import timedelta
+import hashlib
+import json
 import logging
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.event import async_track_point_in_time, async_track_state_change_event
+from homeassistant.helpers.event import (
+    async_track_point_in_time,
+    async_track_state_change_event,
+)
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .calendar_parser import EventInfo, async_get_event_candidates, format_compact_event, split_entities
-from .const import (
-    CONF_ARRIVAL_MARGIN_MINUTES,
-    CONF_CALENDAR_ENTITIES,
-    CONF_ENABLE_AI_DESTINATION,
-    CONF_GOOGLE_API_KEY,
-    CONF_LOOKAHEAD_HOURS,
-    CONF_MAX_EVENT_HOUR,
-    CONF_MIN_EVENT_HOUR,
-    CONF_NOTIFY_SCRIPT,
-    CONF_OLLAMA_MODEL,
-    CONF_OLLAMA_URL,
-    CONF_ORIGIN_ADDRESS,
-    CONF_PREPARE_MINUTES,
-    CONF_TTS_PITCH,
-    CONF_TTS_SERVICE,
-    CONF_TTS_SPEED,
-    CONF_TTS_TARGET,
-    CONF_WEATHER_APPARENT,
-    CONF_WEATHER_DUST,
-    CONF_WEATHER_FEELS_LIKE,
-    CONF_WEATHER_HUMIDITY,
-    CONF_WEATHER_RAIN,
-    CONF_WEATHER_SKY,
-    CONF_WEATHER_TEMP,
-    CONF_WEATHER_UV,
-    CONF_WEATHER_WIND,
-    DEFAULT_ARRIVAL_MARGIN_MINUTES,
-    DEFAULT_CALENDAR_ENTITIES,
-    DEFAULT_LOOKAHEAD_HOURS,
-    DEFAULT_MAX_EVENT_HOUR,
-    DEFAULT_MIN_EVENT_HOUR,
-    DEFAULT_NOTIFY_SCRIPT,
-    DEFAULT_OLLAMA_MODEL,
-    DEFAULT_OLLAMA_URL,
-    DEFAULT_PREPARE_MINUTES,
-    DEFAULT_TTS_PITCH,
-    DEFAULT_TTS_SERVICE,
-    DEFAULT_TTS_SPEED,
-    DEFAULT_TTS_TARGET,
-    DOMAIN,
-    STORAGE_KEY,
-    STORAGE_VERSION,
+from . import const as c
+from .calendar_parser import (
+    async_get_event_candidates,
+    format_compact_event,
+    split_entities,
 )
 from .google_directions import async_get_transit_duration
-from .notify import async_send_universal_notify
-from .ollama_client import async_extract_destination, async_generate_text, build_outfit_prompt, sanitize_tts
+from .google_routes import async_get_route
+from .notify import async_send_mobile_notify, async_send_universal_notify
+from .ollama_client import (
+    async_extract_destination,
+    async_generate_text,
+    build_outfit_prompt,
+    sanitize_tts,
+)
+from .planning import (
+    Plan,
+    fallback_message,
+    find_conflicts,
+    forecast_window,
+    is_quiet,
+    is_virtual,
+    resolve_alias,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
-    """Main coordinator."""
-
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
-        super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=None)
         self.entry = entry
+        super().__init__(
+            hass,
+            _LOGGER,
+            name=c.DOMAIN,
+            config_entry=entry,
+            update_interval=timedelta(
+                minutes=int(self.config.get(c.CONF_POLL_MINUTES, c.DEFAULT_POLL_MINUTES))
+            ),
+        )
         self.session = async_get_clientsession(hass)
-        self._state_unsubs: list[CALLBACK_TYPE] = []
-        self._notify_unsub: CALLBACK_TYPE | None = None
-        self._coordinator_unsub: CALLBACK_TYPE | None = None
-        self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
-        self._last_notified: list[str] = []
+        self._store = Store(hass, c.STORAGE_VERSION, f"{c.STORAGE_KEY}.{entry.entry_id}")
+        self._plans: dict[str, Plan] = {}
+        self._timer_unsubs = {}
+        self._unsubs = []
+        self._tasks: set[asyncio.Task] = set()
+        self._sent: dict[str, str] = {}
+        self._done: dict[str, str] = {}
+        self._snoozed: dict[str, str] = {}
+        self._legacy_notified: list[str] = []
+        self._inflight: set[str] = set()
+        self._retry_at = {}
+        self._retry_counts = {}
+        self._route_cache = {}
+        self._destination_cache = {}
+        self._messages = {}
+        self._message_jobs = set()
+        self._message_sem = asyncio.Semaphore(1)
+        self._calculation_sem = asyncio.Semaphore(4)
+        self._forecasts = []
+        self._forecast_error = ""
+        self._base_debug = {}
         self._last_action = ""
         self._last_action_time = ""
         self._last_notify_result = ""
+        self._started = False
+        self._stopped = False
 
     @property
     def config(self) -> dict[str, Any]:
-        """Merged data and options."""
-        config = dict(self.entry.data)
-        config.update(self.entry.options)
-        return config
+        return {**self.entry.data, **self.entry.options}
 
-    def _mark_action(self, action: str, result: str | None = None) -> None:
-        """Store last manual action/debug state."""
+    def _create_task(self, coroutine):
+        task = self.hass.async_create_task(coroutine)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+        return task
+
+    async def async_start(self) -> None:
+        stored = await self._store.async_load()
+        if stored is None:
+            old = await Store(self.hass, c.STORAGE_VERSION, c.STORAGE_KEY).async_load()
+            self._legacy_notified = list((old or {}).get("last_notified", []))
+        else:
+            self._sent = dict(stored.get("sent", {}))
+            self._done = dict(stored.get("done", {}))
+            self._snoozed = dict(stored.get("snoozed", {}))
+            self._legacy_notified = list(stored.get("legacy_notified", []))
+        entities = self._calendar_entities()
+
+        @callback
+        def state_changed(event):
+            self._create_task(self.async_request_refresh())
+
+        if entities:
+            self._unsubs.append(async_track_state_change_event(self.hass, entities, state_changed))
+        self._unsubs.append(self.async_add_listener(self._schedule_from_current_data))
+        self._unsubs.append(
+            self.hass.bus.async_listen("mobile_app_notification_action", self._mobile_action)
+        )
+        self._started = True
+        self._publish()
+
+    async def async_shutdown(self) -> None:
+        self._stopped = True
+        self._started = False
+        for unsub in [*self._unsubs, *self._timer_unsubs.values()]:
+            unsub()
+        self._unsubs.clear()
+        self._timer_unsubs.clear()
+        tasks = list(self._tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    def _calendar_entities(self):
+        entities = split_entities(
+            self.config.get(c.CONF_CALENDAR_ENTITIES, c.DEFAULT_CALENDAR_ENTITIES)
+        )
+        for profile in self.config.get(c.CONF_FAMILY_PROFILES, {}).values():
+            entities.extend(split_entities(profile.get(c.CONF_CALENDAR_ENTITIES, [])))
+        return list(dict.fromkeys(entities))
+
+    async def async_manual_recalculate(self) -> None:
+        self._route_cache.clear()
+        self._destination_cache.clear()
+        self._retry_counts.clear()
+        self._retry_at.clear()
+        self._mark_action("일정 다시 계산 시작")
+        await self.async_request_refresh()
+        self._mark_action("일정 다시 계산 완료" if self.last_update_success else "일정 계산 실패")
+
+    async def _async_update_data(self):
+        try:
+            return await self._async_calculate()
+        except HomeAssistantError as err:
+            raise UpdateFailed(str(err)) from err
+        except Exception as err:
+            _LOGGER.exception("Schedule calculation failed")
+            raise UpdateFailed(type(err).__name__) from err
+
+    async def _async_calculate(self):
+        cfg = self.config
+        failures = []
+        entities = self._calendar_entities()
+        candidates = await async_get_event_candidates(
+            self.hass,
+            entities,
+            int(cfg.get(c.CONF_LOOKAHEAD_HOURS, c.DEFAULT_LOOKAHEAD_HOURS)),
+            int(cfg.get(c.CONF_MIN_EVENT_HOUR, c.DEFAULT_MIN_EVENT_HOUR)),
+            int(cfg.get(c.CONF_MAX_EVENT_HOUR, c.DEFAULT_MAX_EVENT_HOUR)),
+            errors=failures,
+        )
+        accepted = [item.event for item in candidates if item.accepted]
+        self._base_debug = {
+            "checked_entities": ", ".join(entities),
+            "calendar_errors": failures,
+            "candidate_count": len(candidates),
+            "accepted_candidate_count": len(accepted),
+            "lookahead_hours": int(cfg.get(c.CONF_LOOKAHEAD_HOURS, c.DEFAULT_LOOKAHEAD_HOURS)),
+            "min_event_hour": int(cfg.get(c.CONF_MIN_EVENT_HOUR, c.DEFAULT_MIN_EVENT_HOUR)),
+            "max_event_hour": int(cfg.get(c.CONF_MAX_EVENT_HOUR, c.DEFAULT_MAX_EVENT_HOUR)),
+            "candidate_reject_reason": candidates[0].reject_reason
+            if candidates and not accepted
+            else "",
+        }
+        await self._async_read_forecasts()
+        work = []
+        profiles = cfg.get(c.CONF_FAMILY_PROFILES, {})
+        for event in accepted:
+            matching = [
+                {**cfg, **profile, "id": key}
+                for key, profile in profiles.items()
+                if set(event.sources or (event.source,))
+                & set(split_entities(profile.get(c.CONF_CALENDAR_ENTITIES, [])))
+            ]
+            for profile in matching or [{**cfg, "id": "default", "name": "가족"}]:
+                work.append((event, profile))
+        self._base_debug["plan_limit_exceeded"] = max(0, len(work) - c.MAX_PLANS)
+        plans = await asyncio.gather(
+            *(self._async_build_plan(event, profile) for event, profile in work[: c.MAX_PLANS])
+        )
+        new_plans = {plan.key: plan for plan in plans}
+        # A partial calendar outage must not cancel known upcoming reminders.
+        now = dt_util.now()
+        for key, old in self._plans.items():
+            if (
+                key not in new_plans
+                and old.event.start > now
+                and set(old.event.sources) & set(failures)
+            ):
+                new_plans[key] = old
+        self._plans = new_plans
+        active_event_keys = {plan.event.key for plan in new_plans.values()}
+        self._destination_cache = {
+            key: value
+            for key, value in self._destination_cache.items()
+            if key[0] in active_event_keys
+        }
+        self._route_cache = {
+            key: value
+            for key, value in self._route_cache.items()
+            if value[0] > now - timedelta(minutes=c.ROUTE_CACHE_MINUTES)
+        }
+        self._messages = {key: value for key, value in self._messages.items() if key in new_plans}
+        if not plans and not new_plans and candidates:
+            event = candidates[0].event
+            return {
+                **self._view(),
+                "status": "필터됨",
+                "event_title": event.title,
+                "recognized_event_text": format_compact_event(event),
+                "event_time": event.start.isoformat(),
+                "event_source": event.source,
+                "raw_event_state": event.raw_text,
+                "message": candidates[0].reject_reason,
+            }
+        return self._view()
+
+    async def _async_build_plan(self, event, profile):
+        async with self._calculation_sem:
+            destination, source = await self._async_resolve_destination(event)
+            plan = Plan(event, profile, destination, source)
+            if destination and not is_virtual(event):
+                target = event.start - timedelta(
+                    minutes=int(
+                        profile.get(
+                            c.CONF_ARRIVAL_MARGIN_MINUTES,
+                            c.DEFAULT_ARRIVAL_MARGIN_MINUTES,
+                        )
+                    )
+                )
+                mode = profile.get(c.CONF_TRAVEL_MODE, c.DEFAULT_TRAVEL_MODE)
+                cache_key = (
+                    profile.get(c.CONF_ROUTE_PROVIDER, c.DEFAULT_ROUTE_PROVIDER),
+                    profile.get(c.CONF_ORIGIN_ADDRESS, ""),
+                    destination,
+                    target.isoformat(),
+                    mode,
+                )
+                cached = self._route_cache.get(cache_key)
+                if cached and cached[0] > dt_util.now() - timedelta(minutes=c.ROUTE_CACHE_MINUTES):
+                    plan.route = cached[1]
+                else:
+                    route_fn = (
+                        async_get_route if cache_key[0] == "routes" else async_get_transit_duration
+                    )
+                    plan.route = await route_fn(
+                        self.session,
+                        str(profile.get(c.CONF_GOOGLE_API_KEY, "")),
+                        str(profile.get(c.CONF_ORIGIN_ADDRESS, "")),
+                        destination,
+                        target,
+                        mode=mode,
+                    )
+                    if plan.route is not None:
+                        self._route_cache[cache_key] = (dt_util.now(), plan.route)
+            plan.calculate_times(
+                int(profile.get(c.CONF_PREPARE_MINUTES, c.DEFAULT_PREPARE_MINUTES)),
+                int(profile.get(c.CONF_ARRIVAL_MARGIN_MINUTES, c.DEFAULT_ARRIVAL_MARGIN_MINUTES)),
+                int(profile.get(c.CONF_FALLBACK_TRAVEL_MINUTES, 0)),
+            )
+            if plan.departure_time is not None:
+                plan.departure_time = dt_util.as_local(plan.departure_time)
+            if plan.notify_time is not None:
+                plan.notify_time = dt_util.as_local(plan.notify_time)
+            plan.weather = self._weather_for_plan(plan)
+            return plan
+
+    async def _async_resolve_destination(self, event):
+        cfg = self.config
+        if is_virtual(event):
+            return "", "virtual"
+        alias = resolve_alias(event, cfg.get(c.CONF_PLACE_ALIASES, {}))
+        if alias:
+            return alias, "saved_alias"
+        if event.location.strip():
+            return event.location.strip(), "calendar_location"
+        cache_key = (event.key, event.description)
+        cached = self._destination_cache.get(cache_key)
+        if cached and cached[0] > dt_util.now() - timedelta(minutes=c.ROUTE_CACHE_MINUTES):
+            return cached[1], "ai_extracted" if cached[1] else "none"
+        destination = ""
+        if cfg.get(c.CONF_ENABLE_AI_DESTINATION, True) and cfg.get(
+            c.CONF_OLLAMA_URL, c.DEFAULT_OLLAMA_URL
+        ):
+            destination = await async_extract_destination(
+                self.session,
+                str(cfg.get(c.CONF_OLLAMA_URL, c.DEFAULT_OLLAMA_URL)),
+                str(cfg.get(c.CONF_OLLAMA_MODEL, c.DEFAULT_OLLAMA_MODEL)),
+                event.title,
+                event.description,
+            )
+        self._destination_cache[cache_key] = (dt_util.now(), destination)
+        return destination, "ai_extracted" if destination else "none"
+
+    def _channels(self, plan):
+        channels = {}
+        script = str(plan.profile.get(c.CONF_NOTIFY_SCRIPT, c.DEFAULT_NOTIFY_SCRIPT)).strip()
+        mobile = str(plan.profile.get(c.CONF_MOBILE_NOTIFY_SERVICE, "")).strip()
+        if script:
+            channels["script"] = script
+        if mobile:
+            channels["mobile"] = mobile
+        return channels
+
+    def _stage_done(self, plan, stage):
+        if f"{plan.key}:all" in self._done or f"{plan.key}:{stage}" in self._done:
+            return True
+        if stage == "prepare" and any(
+            key in self._legacy_notified for key in plan.event.legacy_keys
+        ):
+            return True
+        channels = self._channels(plan)
+        return bool(channels) and all(
+            f"{plan.key}:{stage}:{channel}" in self._sent for channel in channels
+        )
+
+    def _stages(self, plan):
+        stages = [("prepare", plan.notify_time)]
+        if (
+            plan.profile.get(c.CONF_DEPARTURE_REMINDER, False)
+            and plan.departure_time is not None
+            and plan.departure_time != plan.notify_time
+        ):
+            stages.append(("departure", plan.departure_time))
+        now = dt_util.now()
+        # If both reminders were missed during downtime, send the departure
+        # reminder once instead of two back-to-back notifications.
+        if len(stages) == 2 and plan.departure_time <= now:
+            stages = stages[1:]
+        result = []
+        for stage, when in stages:
+            if when is None or self._stage_done(plan, stage):
+                continue
+            token = f"{plan.key}:{stage}"
+            snoozed = dt_util.parse_datetime(self._snoozed.get(token, ""))
+            if snoozed is not None:
+                when = dt_util.as_local(snoozed)
+            retry = self._retry_at.get(token)
+            if retry is not None:
+                when = max(when, retry)
+            result.append((stage, when))
+        return result
+
+    @callback
+    def _schedule_from_current_data(self):
+        if not self._started or self._stopped:
+            return
+        for unsub in self._timer_unsubs.values():
+            unsub()
+        self._timer_unsubs.clear()
+        now = dt_util.now()
+        for plan in self._plans.values():
+            if plan.event.start <= now:
+                continue
+            for stage, when in self._stages(plan):
+                token = f"{plan.key}:{stage}"
+                if token in self._inflight or self._retry_counts.get(token, 0) >= 3:
+                    continue
+                fire_at = max(when, now + timedelta(seconds=1))
+                if fire_at >= plan.event.start:
+                    continue
+
+                @callback
+                def fire(_now, key=plan.key, kind=stage, timer_key=token):
+                    self._timer_unsubs.pop(timer_key, None)
+                    self._create_task(self._async_notify(key, kind))
+
+                self._timer_unsubs[token] = async_track_point_in_time(self.hass, fire, fire_at)
+                if stage == "prepare" and when > now and when - now <= timedelta(minutes=15):
+                    self._prewarm(plan)
+
+    def _signature(self, plan):
+        data = plan.as_data()
+        return hashlib.sha256(
+            json.dumps(data, sort_keys=True, ensure_ascii=False).encode()
+        ).hexdigest()
+
+    def _prewarm(self, plan):
+        if not self.config.get(c.CONF_ENABLE_OUTFIT_AI, True) or not self.config.get(
+            c.CONF_OLLAMA_URL, c.DEFAULT_OLLAMA_URL
+        ):
+            return
+        signature = self._signature(plan)
+        if self._messages.get(plan.key, (None,))[0] == signature or plan.key in self._message_jobs:
+            return
+        self._message_jobs.add(plan.key)
+        self._create_task(self._async_prewarm(plan, signature))
+
+    async def _async_prewarm(self, plan, signature):
+        try:
+            async with self._message_sem:
+                if (
+                    self._stopped
+                    or plan.key not in self._plans
+                    or self._stage_done(plan, "prepare")
+                ):
+                    return
+                text = await async_generate_text(
+                    self.session,
+                    str(self.config.get(c.CONF_OLLAMA_URL, c.DEFAULT_OLLAMA_URL)),
+                    str(self.config.get(c.CONF_OLLAMA_MODEL, c.DEFAULT_OLLAMA_MODEL)),
+                    build_outfit_prompt(plan.as_data(), plan.weather),
+                    timeout=20,
+                )
+                text = sanitize_tts(text)
+                current = self._plans.get(plan.key)
+                if current is not None and self._signature(current) == signature and len(text) > 10:
+                    self._messages[plan.key] = (signature, text[:800])
+        except Exception:
+            _LOGGER.exception("Outfit pre-generation failed; using the deterministic message")
+        finally:
+            self._message_jobs.discard(plan.key)
+
+    async def async_generate_and_notify(self, *, test=False):
+        if not self._plans:
+            await self.async_request_refresh()
+        key = (self.data or {}).get("event_key")
+        if key not in self._plans:
+            self._mark_action("테스트 알림 실패", "알림 가능한 예정 일정이 없습니다")
+            return
+        await self._async_notify(key, "prepare", test=test)
+
+    async def _async_notify(self, key, stage, *, test=False):
+        token = f"{key}:{stage}"
+        plan = self._plans.get(key)
+        if self._stopped or plan is None or token in self._inflight:
+            return
+        if not test and (plan.event.start <= dt_util.now() or self._stage_done(plan, stage)):
+            return
+        self._inflight.add(token)
+        try:
+            self._mark_action("테스트 알림 실행 중" if test else "자동 알림 실행 중")
+            # Automatic notifications never wait for an LLM at their due time.
+            plan.weather = self._weather_for_plan(plan)
+            message = fallback_message(plan, stage)
+            cached = self._messages.get(key)
+            if stage == "prepare" and cached and cached[0] == self._signature(plan):
+                message += " " + cached[1]
+            channels = self._channels(plan)
+            failures = []
+            successes = []
+            if not channels:
+                failures.append("알림 스크립트 또는 휴대폰 알림 서비스를 설정하세요")
+            for channel, service in channels.items():
+                receipt = f"{token}:{channel}"
+                if not test and receipt in self._sent:
+                    continue
+                # A refresh/action may have removed or completed this event while
+                # another channel was running. Never dispatch stale follow-up work.
+                if not test and (
+                    key not in self._plans or self._stage_done(self._plans[key], stage)
+                ):
+                    break
+                try:
+                    if channel == "script":
+                        quiet = is_quiet(
+                            dt_util.now(),
+                            bool(plan.profile.get(c.CONF_QUIET_ENABLED, False)),
+                            int(plan.profile.get(c.CONF_QUIET_START, 22)),
+                            int(plan.profile.get(c.CONF_QUIET_END, 7)),
+                        )
+                        person_entity = plan.profile.get("person_entity")
+                        person = self.hass.states.get(person_entity) if person_entity else None
+                        tts_enabled = not quiet and (
+                            not person_entity or (person is not None and person.state == "home")
+                        )
+                        await asyncio.wait_for(
+                            async_send_universal_notify(
+                                self.hass,
+                                notify_script=service,
+                                message=message,
+                                tts_target=str(
+                                    plan.profile.get(c.CONF_TTS_TARGET, c.DEFAULT_TTS_TARGET)
+                                ),
+                                tts_service=str(
+                                    plan.profile.get(c.CONF_TTS_SERVICE, c.DEFAULT_TTS_SERVICE)
+                                ),
+                                speed=float(
+                                    plan.profile.get(c.CONF_TTS_SPEED, c.DEFAULT_TTS_SPEED)
+                                ),
+                                pitch=float(
+                                    plan.profile.get(c.CONF_TTS_PITCH, c.DEFAULT_TTS_PITCH)
+                                ),
+                                tts_enabled=tts_enabled,
+                            ),
+                            timeout=45,
+                        )
+                    else:
+                        await asyncio.wait_for(
+                            async_send_mobile_notify(
+                                self.hass,
+                                service,
+                                message,
+                                actions=self._notification_actions(plan, stage, test),
+                                tag=f"fsa_{self.entry.entry_id}_{hashlib.sha256(key.encode()).hexdigest()[:12]}",
+                                route_link=plan.as_data()["route_link"],
+                            ),
+                            timeout=15,
+                        )
+                    successes.append(channel)
+                    if not test:
+                        self._sent[receipt] = dt_util.now().isoformat()
+                        await self._save_state()
+                except Exception as err:  # noqa: BLE001 - user scripts can raise arbitrary service errors
+                    failures.append(f"{channel}: {type(err).__name__}")
+                    _LOGGER.warning(
+                        "Family reminder channel %s failed (%s)",
+                        channel,
+                        type(err).__name__,
+                    )
+            if failures and not test:
+                self._retry_counts[token] = self._retry_counts.get(token, 0) + 1
+                self._retry_at[token] = dt_util.now() + timedelta(minutes=1)
+            else:
+                self._retry_counts.pop(token, None)
+                self._retry_at.pop(token, None)
+                if not test:
+                    self._snoozed.pop(token, None)
+                    await self._save_state()
+            result = (
+                "알림 실행 실패: " + ", ".join(failures)
+                if failures
+                else ("테스트 알림 실행 완료" if test else "알림 서비스 실행 완료")
+            )
+            if key in self._plans:
+                self._messages.setdefault(key, ("", ""))
+                self._base_debug["last_message_event_key"] = key
+                self._base_debug["last_message"] = message
+            self._last_notify_result = result
+            self._last_action = "테스트 알림 완료" if test else "자동 알림 완료"
+        finally:
+            self._inflight.discard(token)
+            self._publish()
+
+    def _notification_actions(self, plan, stage, test=False):
+        if test:
+            return []
+        token = hashlib.sha256(plan.key.encode()).hexdigest()[:16]
+        prefix = f"FSA_{self.entry.entry_id}_{token}_{stage}_"
+        return [
+            {"action": prefix + command, "title": title}
+            for command, title in (
+                ("prepared", "준비 완료"),
+                ("departed", "출발했어요"),
+                (
+                    "snooze",
+                    f"{self.config.get(c.CONF_SNOOZE_MINUTES, c.DEFAULT_SNOOZE_MINUTES)}분 뒤 다시",
+                ),
+                ("skip", "오늘 건너뛰기"),
+            )
+        ]
+
+    @callback
+    def _mobile_action(self, event):
+        action = str(event.data.get("action", ""))
+        prefix = f"FSA_{self.entry.entry_id}_"
+        if not action.startswith(prefix):
+            return
+        parts = action[len(prefix) :].split("_")
+        if (
+            len(parts) != 3
+            or parts[1] not in {"prepare", "departure"}
+            or parts[2] not in {"prepared", "departed", "snooze", "skip"}
+        ):
+            return
+        token, stage, command = parts
+        for key in self._plans:
+            if hashlib.sha256(key.encode()).hexdigest()[:16] == token:
+                self._create_task(self._async_mobile_action(command, key, stage))
+                return
+
+    async def _async_mobile_action(self, command, key, stage):
+        try:
+            await self.async_event_action(command, event_key=key, stage=stage)
+        except ServiceValidationError as err:
+            self._mark_action("알림 버튼 처리 불가", str(err))
+
+    async def async_event_action(
+        self, command: str, *, event_key=None, stage="prepare", minutes=None
+    ):
+        key = event_key or (self.data or {}).get("event_key")
+        plan = self._plans.get(key)
+        if plan is None or plan.event.start <= dt_util.now():
+            raise ServiceValidationError("처리할 예정 일정이 없습니다")
+        if command not in {"prepared", "departed", "snooze", "skip"} or stage not in {
+            "prepare",
+            "departure",
+        }:
+            raise ServiceValidationError("지원하지 않는 알림 동작입니다")
+        now = dt_util.now()
+        if command == "snooze":
+            delay = int(
+                minutes
+                if minutes is not None
+                else self.config.get(c.CONF_SNOOZE_MINUTES, c.DEFAULT_SNOOZE_MINUTES)
+            )
+            if delay < 1 or delay > 60 or now + timedelta(minutes=delay) >= plan.event.start:
+                raise ServiceValidationError("다시 알림은 1~60분이며 일정 시작 전이어야 합니다")
+            if f"{key}:all" in self._done:
+                raise ServiceValidationError("이미 완료하거나 건너뛴 일정입니다")
+            token = f"{key}:{stage}"
+            self._done.pop(token, None)
+            for receipt in [receipt for receipt in self._sent if receipt.startswith(token + ":")]:
+                self._sent.pop(receipt)
+            self._legacy_notified = [
+                value for value in self._legacy_notified if value not in plan.event.legacy_keys
+            ]
+            self._snoozed[token] = (now + timedelta(minutes=delay)).isoformat()
+            self._retry_counts.pop(token, None)
+            self._retry_at.pop(token, None)
+        else:
+            self._done[f"{key}:prepare" if command == "prepared" else f"{key}:all"] = (
+                now.isoformat()
+            )
+            for token in [token for token in self._snoozed if token.startswith(key + ":")]:
+                if command != "prepared" or token.endswith(":prepare"):
+                    self._snoozed.pop(token, None)
+        await self._save_state()
+        labels = {
+            "prepared": "준비 완료",
+            "departed": "출발 완료",
+            "skip": "일정 알림 건너뜀",
+            "snooze": "다시 알림 예약",
+        }
+        self._mark_action(labels[command], plan.event.title)
+
+    async def _save_state(self):
+        cutoff = dt_util.now() - timedelta(days=14)
+        for values in (self._sent, self._done):
+            for key, timestamp in list(values.items()):
+                parsed = dt_util.parse_datetime(timestamp)
+                if parsed is None or dt_util.as_local(parsed) < cutoff:
+                    values.pop(key, None)
+        for key, timestamp in list(self._snoozed.items()):
+            parsed = dt_util.parse_datetime(timestamp)
+            if parsed is None or dt_util.as_local(parsed) < cutoff:
+                self._snoozed.pop(key, None)
+        await self._store.async_save(
+            {
+                "sent": self._sent,
+                "done": self._done,
+                "snoozed": self._snoozed,
+                "legacy_notified": self._legacy_notified[-50:],
+            }
+        )
+
+    def _mark_action(self, action, result=None):
         self._last_action = action
         self._last_action_time = dt_util.now().isoformat()
         if result is not None:
             self._last_notify_result = result
+        self._publish()
 
-        if self.data is not None:
-            new_data = dict(self.data)
-            new_data["last_action"] = self._last_action
-            new_data["last_action_time"] = self._last_action_time
-            new_data["last_notify_result"] = self._last_notify_result
-            self.async_set_updated_data(new_data)
+    def _publish(self):
+        if not self._stopped:
+            self.async_set_updated_data(self._view())
 
-    def _debug_fields(self) -> dict[str, str]:
-        """Return last action fields for sensors."""
-        return {
-            "last_action": self._last_action,
-            "last_action_time": self._last_action_time,
-            "last_notify_result": self._last_notify_result,
-        }
-
-    @staticmethod
-    def _candidate_sort_key(candidate) -> tuple:
-        """Sort events and prefer rich calendar events over simple sensor events."""
-        event = candidate.event
-        return (
-            event.start,
-            0 if candidate.accepted else 1,
-            0 if event.location and str(event.location).strip() else 1,
-            0 if str(event.source).startswith("calendar.") else 1,
-            0 if event.description and str(event.description).strip() else 1,
-            str(event.source),
+    def _view(self):
+        plans = sorted(self._plans.values(), key=lambda plan: plan.event.start)
+        pending = [(when, plan) for plan in plans for _, when in self._stages(plan)]
+        selected = (
+            min(pending, key=lambda item: item[0])[1] if pending else (plans[0] if plans else None)
         )
-
-    async def async_manual_recalculate(self) -> None:
-        """Recalculate from button/service and expose visible feedback."""
-        self._mark_action("일정 다시 계산 시작", "")
-        await self.async_request_refresh()
-        self._mark_action("일정 다시 계산 완료", self._last_notify_result)
-
-    async def async_start(self) -> None:
-        """Start listeners and scheduling."""
-        stored = await self._store.async_load()
-        self._last_notified = list((stored or {}).get("last_notified", []))[-50:]
-
-        entities = split_entities(self.config.get(CONF_CALENDAR_ENTITIES, DEFAULT_CALENDAR_ENTITIES))
-
-        @callback
-        def _state_changed(event) -> None:
-            self.hass.async_create_task(self.async_request_refresh())
-
-        if entities:
-            self._state_unsubs.append(async_track_state_change_event(self.hass, entities, _state_changed))
-
-        self._coordinator_unsub = self.async_add_listener(self._schedule_from_current_data)
-        self._schedule_from_current_data()
-
-    async def async_shutdown(self) -> None:
-        """Shutdown listeners."""
-        for unsub in self._state_unsubs:
-            unsub()
-        self._state_unsubs.clear()
-        if self._notify_unsub:
-            self._notify_unsub()
-            self._notify_unsub = None
-        if self._coordinator_unsub:
-            self._coordinator_unsub()
-            self._coordinator_unsub = None
-
-    async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch and calculate next event state."""
-        try:
-            return await self._async_calculate()
-        except Exception as err:  # noqa: BLE001
-            raise UpdateFailed(str(err)) from err
-
-    async def _async_calculate(self) -> dict[str, Any]:
-        cfg = self.config
-        entities = split_entities(cfg.get(CONF_CALENDAR_ENTITIES, DEFAULT_CALENDAR_ENTITIES))
-        lookahead_hours = int(cfg.get(CONF_LOOKAHEAD_HOURS, DEFAULT_LOOKAHEAD_HOURS))
-        min_hour = int(cfg.get(CONF_MIN_EVENT_HOUR, DEFAULT_MIN_EVENT_HOUR))
-        max_hour = int(cfg.get(CONF_MAX_EVENT_HOUR, DEFAULT_MAX_EVENT_HOUR))
-        candidates = await async_get_event_candidates(self.hass, entities, lookahead_hours, min_hour, max_hour)
-        candidates = sorted(candidates, key=self._candidate_sort_key)
-        accepted = sorted([candidate for candidate in candidates if candidate.accepted], key=self._candidate_sort_key)
-        first_candidate = candidates[0] if candidates else None
-
-        base_debug = {
-            **self._debug_fields(),
-            "checked_entities": ", ".join(entities),
-            "lookahead_hours": lookahead_hours,
-            "min_event_hour": min_hour,
-            "max_event_hour": max_hour,
-            "candidate_count": len(candidates),
-            "accepted_candidate_count": len(accepted),
-            "candidate_reject_reason": first_candidate.reject_reason if first_candidate else "",
-        }
-
-        if not accepted:
-            if first_candidate is not None:
-                event = first_candidate.event
-                fallback_destination = event.location or event.title
-                return {
-                    **base_debug,
-                    "status": "필터됨",
-                    "event_title": event.title,
-                    "event_key": "",
-                    "recognized_event_text": format_compact_event(event),
-                    "raw_event_state": event.raw_text,
-                    "event_source": event.source,
-                    "event_location": event.location,
-                    "event_description": event.description,
-                    "event_time": event.start.isoformat(),
-                    "event_time_text": self._format_korean_time(event.start),
-                    "destination": fallback_destination,
-                    "destination_source": "calendar_location" if event.location else "event_title",
-                    "route_status": "SKIPPED",
-                    "route_summary": "",
-                    "route_steps": [],
-                    "message": f"일정은 인식했지만 알림 대상에서 제외되었습니다. 사유: {first_candidate.reject_reason}",
-                }
-            return {
-                **base_debug,
+        data = (
+            selected.as_data()
+            if selected
+            else {
                 "status": "대기 중",
-                "event_title": "",
                 "event_key": "",
+                "event_title": "",
                 "recognized_event_text": "인식된 일정 없음",
-                "raw_event_state": "",
-                "event_location": "",
-                "event_description": "",
-                "destination_source": "",
-                "route_status": "",
-                "route_summary": "",
-                "route_steps": [],
+                "event_time": None,
+                "departure_time": None,
+                "notify_time": None,
                 "message": "예정된 일정이 없습니다.",
             }
-
-        selected_candidate = accepted[0]
-        event = selected_candidate.event
-        prepare_minutes = int(cfg.get(CONF_PREPARE_MINUTES, DEFAULT_PREPARE_MINUTES))
-        arrival_margin = int(cfg.get(CONF_ARRIVAL_MARGIN_MINUTES, DEFAULT_ARRIVAL_MARGIN_MINUTES))
-        arrival_target = event.start - timedelta(minutes=arrival_margin)
-
-        destination, destination_source = await self._async_resolve_destination(event)
-        route_status = "SKIPPED"
-        route_error = ""
-        transit_seconds = 0
-        transit_text = ""
-        start_address = ""
-        end_address = ""
-        route_summary = ""
-        route_steps: list[str] = []
-
-        if destination:
-            result = await async_get_transit_duration(
-                self.session,
-                str(cfg.get(CONF_GOOGLE_API_KEY, "")).strip(),
-                str(cfg.get(CONF_ORIGIN_ADDRESS, "")).strip(),
-                destination,
-                arrival_target,
-            )
-            if result:
-                route_status = result.status
-                route_error = result.error_message
-                transit_seconds = int(result.duration_seconds or 0)
-                transit_text = result.duration_text
-                start_address = result.start_address
-                end_address = result.end_address
-                route_summary = result.route_summary
-                route_steps = result.route_steps
-
-        if transit_seconds > 0:
-            departure_time = arrival_target - timedelta(seconds=transit_seconds)
-        else:
-            departure_time = event.start - timedelta(minutes=60)
-            transit_text = transit_text or "정보 없음"
-
-        notify_time = departure_time - timedelta(minutes=prepare_minutes)
-
-        return {
-            **base_debug,
-            "status": "준비 완료" if destination else "장소 없음",
-            "candidate_reject_reason": "",
-            "event_key": event.key,
-            "event_title": event.title,
-            "recognized_event_text": format_compact_event(event),
-            "raw_event_state": event.raw_text,
-            "event_source": event.source,
-            "event_location": event.location,
-            "event_description": event.description,
-            "event_time": event.start.isoformat(),
-            "event_time_text": self._format_korean_time(event.start),
-            "destination": destination,
-            "destination_source": destination_source,
-            "transit_duration_seconds": transit_seconds,
-            "transit_duration_text": transit_text,
-            "route_status": route_status,
-            "route_error": route_error,
-            "route_summary": route_summary,
-            "route_steps": route_steps,
-            "start_address": start_address,
-            "end_address": end_address,
-            "departure_time": departure_time.isoformat(),
-            "departure_time_text": self._format_korean_time(departure_time),
-            "notify_time": notify_time.isoformat(),
-            "notify_time_text": self._format_korean_time(notify_time),
-            "outfit_message": (self.data or {}).get("outfit_message", ""),
-            "message": "다음 일정 계산 완료",
-        }
-
-    async def _async_resolve_destination(self, event: EventInfo) -> tuple[str, str]:
-        """Resolve destination from event location, title, description, or AI."""
-        cfg = self.config
-        if event.location and event.location.strip():
-            return event.location.strip(), "calendar_location"
-
-        title = event.title.strip()
-        description = event.description.strip()
-        if not title:
-            return "", "none"
-
-        if cfg.get(CONF_ENABLE_AI_DESTINATION, True):
-            extracted = await async_extract_destination(
-                self.session,
-                str(cfg.get(CONF_OLLAMA_URL, DEFAULT_OLLAMA_URL)),
-                str(cfg.get(CONF_OLLAMA_MODEL, DEFAULT_OLLAMA_MODEL)),
-                title,
-                description,
-            )
-            if extracted:
-                return extracted, "ai_extracted"
-
-        return title, "event_title"
-
-    @callback
-    def _schedule_from_current_data(self) -> None:
-        """Schedule notification from current data."""
-        if self._notify_unsub:
-            self._notify_unsub()
-            self._notify_unsub = None
-
-        data = self.data or {}
-        notify_time_raw = data.get("notify_time")
-        event_key = data.get("event_key")
-        if not notify_time_raw or not event_key:
-            return
-        if event_key in self._last_notified:
-            return
-
-        notify_time = dt_util.parse_datetime(str(notify_time_raw))
-        if notify_time is None:
-            return
-        notify_time = dt_util.as_local(notify_time)
-        now = dt_util.now()
-        if notify_time <= now:
-            _LOGGER.info("Notification time already passed for %s", data.get("event_title"))
-            return
-
-        @callback
-        def _fire(_now) -> None:
-            self.hass.async_create_task(self.async_generate_and_notify(test=False))
-
-        self._notify_unsub = async_track_point_in_time(self.hass, _fire, notify_time)
-        _LOGGER.info("Scheduled departure advisor notification at %s", notify_time)
-
-    async def async_generate_and_notify(self, *, test: bool = False) -> None:
-        """Generate AI message and send notification."""
-        self._mark_action("테스트 알림 생성 중" if test else "자동 알림 생성 중", "")
-
-        if not self.data:
-            await self.async_request_refresh()
-
-        data = dict(self.data or {})
-        event_key = data.get("event_key")
-
-        if not event_key and test and data.get("event_title"):
-            event_key = f"test:{data.get('event_source','')}:{data.get('event_time','')}:{data.get('event_title','')}"
-            data["event_key"] = event_key
-            data.setdefault("transit_duration_text", data.get("transit_duration_text") or "정보 없음")
-            data.setdefault("departure_time_text", data.get("departure_time_text") or "정보 없음")
-            data.setdefault("notify_time_text", data.get("notify_time_text") or "정보 없음")
-
-        if not event_key:
-            self._mark_action("테스트 알림 실패" if test else "자동 알림 실패", "인식된 일정이 없어 알림을 보낼 수 없습니다")
-            return
-        if not test and event_key in self._last_notified:
-            self._mark_action("자동 알림 건너뜀", "이미 발송한 일정입니다")
-            return
-
-        weather = self._read_weather()
-        prompt = build_outfit_prompt(data, weather)
-        cfg = self.config
-        text = ""
-        for idx in range(3):
-            text = await async_generate_text(
-                self.session,
-                str(cfg.get(CONF_OLLAMA_URL, DEFAULT_OLLAMA_URL)),
-                str(cfg.get(CONF_OLLAMA_MODEL, DEFAULT_OLLAMA_MODEL)),
-                prompt,
-                timeout=120,
-            )
-            text = sanitize_tts(text)
-            if len(text) > 10:
-                break
-            if idx < 2:
-                await asyncio.sleep(2)
-
-        if not text:
-            text = self._fallback_message(data)
-
-        try:
-            await async_send_universal_notify(
-                self.hass,
-                notify_script=str(cfg.get(CONF_NOTIFY_SCRIPT, DEFAULT_NOTIFY_SCRIPT)),
-                message=text,
-                tts_target=str(cfg.get(CONF_TTS_TARGET, DEFAULT_TTS_TARGET)),
-                tts_service=str(cfg.get(CONF_TTS_SERVICE, DEFAULT_TTS_SERVICE)),
-                speed=float(cfg.get(CONF_TTS_SPEED, DEFAULT_TTS_SPEED)),
-                pitch=float(cfg.get(CONF_TTS_PITCH, DEFAULT_TTS_PITCH)),
-            )
-        except Exception as err:  # noqa: BLE001
-            _LOGGER.warning("Family Schedule Advisor notification failed: %s", err)
-            new_data = dict(self.data or {})
-            new_data["outfit_message"] = text
-            new_data["last_action"] = self._last_action
-            new_data["last_action_time"] = self._last_action_time
-            new_data["last_notify_result"] = f"알림 실패: {err}"
-            self._last_notify_result = new_data["last_notify_result"]
-            self.async_set_updated_data(new_data)
-            return
-
-        new_data = dict(self.data or {})
-        new_data["outfit_message"] = text
-        new_data["last_action"] = self._last_action
-        new_data["last_action_time"] = self._last_action_time
-        new_data["last_notify_result"] = "테스트 발송 요청 완료" if test else "발송 요청 완료"
-        self._last_notify_result = new_data["last_notify_result"]
-        self.async_set_updated_data(new_data)
-
-        if not test:
-            self._last_notified.append(str(event_key))
-            self._last_notified = self._last_notified[-50:]
-            await self._store.async_save({"last_notified": self._last_notified})
-
-    def _read_weather(self) -> dict[str, str]:
-        cfg = self.config
-        return {
-            "rain": self._read_entity(cfg.get(CONF_WEATHER_RAIN), "%"),
-            "feels_like": self._read_entity(cfg.get(CONF_WEATHER_FEELS_LIKE), "도"),
-            "temp": self._read_entity(cfg.get(CONF_WEATHER_TEMP), "도"),
-            "humidity": self._read_entity(cfg.get(CONF_WEATHER_HUMIDITY), "%"),
-            "wind": self._read_entity(cfg.get(CONF_WEATHER_WIND), ""),
-            "sky": self._read_entity(cfg.get(CONF_WEATHER_SKY), ""),
-            "dust": self._read_entity(cfg.get(CONF_WEATHER_DUST), ""),
-            "uv": self._read_entity(cfg.get(CONF_WEATHER_UV), ""),
-            "apparent": self._read_entity(cfg.get(CONF_WEATHER_APPARENT), "도"),
-        }
-
-    def _read_entity(self, entity_id: str | None, fallback_unit: str = "") -> str:
-        if not entity_id:
-            return "정보 없음"
-        state = self.hass.states.get(str(entity_id).strip())
-        if state is None or state.state in ("unknown", "unavailable", "none", ""):
-            return "정보 없음"
-        unit = state.attributes.get("unit_of_measurement") or fallback_unit
-        value = str(state.state)
-        if unit and not value.endswith(str(unit)):
-            return f"{value}{unit}"
-        return value
-
-    @staticmethod
-    def _format_korean_time(value) -> str:
-        return f"{value.month}월 {value.day}일 {value.hour}시 {value.minute:02d}분"
-
-    @staticmethod
-    def _format_compact_event(value, title: str) -> str:
-        return f"{value.month:02d}월{value.day:02d}일 {value.hour:02d}:{value.minute:02d} {title}".strip()
-
-    @staticmethod
-    def _fallback_message(data: dict[str, Any]) -> str:
-        title = data.get("event_title") or "일정"
-        event_time = data.get("event_time_text") or "예정된 시간"
-        departure = data.get("departure_time_text") or "출발 전"
-        duration = data.get("transit_duration_text") or "정보 없음"
-        destination = data.get("destination") or "목적지"
-        return (
-            f"오늘 {event_time}에 {title} 일정이 있습니다. "
-            f"목적지는 {destination}입니다. "
-            f"대중교통 예상 소요시간은 {duration}입니다. "
-            f"여유 있게 준비하려면 {departure}쯤 출발을 생각해 주세요. "
-            "날씨를 확인해서 편한 옷차림으로 준비해 주세요."
         )
+        data.update(self._base_debug)
+        data.update(
+            {
+                "last_action": self._last_action,
+                "last_action_time": self._last_action_time,
+                "last_notify_result": self._last_notify_result,
+                "forecast_error": self._forecast_error,
+                "upcoming_events": [plan.as_data() for plan in plans],
+                "today_events": [
+                    plan.as_data()
+                    for plan in plans
+                    if plan.event.start.date() == dt_util.now().date()
+                ],
+                "conflicts": find_conflicts(plans),
+                "plan_count": len(plans),
+                "pending_reminders": len(pending),
+            }
+        )
+        data["outfit_message"] = (
+            self._base_debug.get("last_message", "")
+            if selected and self._base_debug.get("last_message_event_key") == selected.key
+            else ""
+        )
+        return data
+
+    async def _async_read_forecasts(self):
+        entity_id = self.config.get(c.CONF_WEATHER_ENTITY)
+        self._forecasts = []
+        self._forecast_error = ""
+        if not entity_id:
+            return
+        try:
+            result = await self.hass.services.async_call(
+                "weather",
+                "get_forecasts",
+                {"type": "hourly"},
+                target={"entity_id": entity_id},
+                blocking=True,
+                return_response=True,
+            )
+            self._forecasts = ((result or {}).get(entity_id) or {}).get("forecast", [])
+        except (HomeAssistantError, TypeError, ValueError):
+            self._forecast_error = "시간별 예보를 사용할 수 없어 현재 날씨를 사용합니다"
+
+    def _weather_for_plan(self, plan):
+        cfg = self.config
+        keys = {
+            "rain": c.CONF_WEATHER_RAIN,
+            "feels_like": c.CONF_WEATHER_FEELS_LIKE,
+            "temp": c.CONF_WEATHER_TEMP,
+            "humidity": c.CONF_WEATHER_HUMIDITY,
+            "wind": c.CONF_WEATHER_WIND,
+            "sky": c.CONF_WEATHER_SKY,
+            "dust": c.CONF_WEATHER_DUST,
+            "uv": c.CONF_WEATHER_UV,
+            "apparent": c.CONF_WEATHER_APPARENT,
+        }
+        weather = {name: self._read_entity(cfg.get(key)) for name, key in keys.items()}
+        state = (
+            self.hass.states.get(cfg.get(c.CONF_WEATHER_ENTITY))
+            if cfg.get(c.CONF_WEATHER_ENTITY)
+            else None
+        )
+        if state is not None:
+            if weather["temp"] == "정보 없음" and state.attributes.get("temperature") is not None:
+                weather["temp"] = self._temperature(
+                    state.attributes["temperature"],
+                    state.attributes.get("temperature_unit", "°C"),
+                )
+            if weather["sky"] == "정보 없음":
+                weather["sky"] = state.state
+        start = plan.departure_time or plan.event.start
+        end = plan.event.end or plan.event.start + timedelta(hours=1)
+        window = forecast_window(self._forecasts, start, end)
+        if window:
+            temperatures = [
+                float(item["temperature"])
+                for item in window
+                if isinstance(item.get("temperature"), (int, float))
+            ]
+            rain = [
+                float(item["precipitation_probability"])
+                for item in window
+                if isinstance(item.get("precipitation_probability"), (int, float))
+            ]
+            if temperatures:
+                weather["forecast_temp"] = self._temperature(
+                    min(temperatures),
+                    state.attributes.get("temperature_unit", "°C") if state else "°C",
+                )
+            if rain:
+                weather["forecast_rain"] = f"{max(rain):g}%"
+            conditions = [item.get("condition", "") for item in window]
+            rainy = {"rainy", "pouring", "lightning-rainy", "snowy-rainy"}
+            weather["forecast_condition"] = next(
+                (value for value in conditions if value in rainy), conditions[0]
+            )
+        return weather
+
+    @staticmethod
+    def _temperature(value, unit):
+        try:
+            temperature = float(value)
+            if unit == "°F":
+                temperature = (temperature - 32) * 5 / 9
+            return f"{temperature:g}도"
+        except (ValueError, TypeError):
+            return "정보 없음"
+
+    def _read_entity(self, entity_id):
+        state = self.hass.states.get(str(entity_id)) if entity_id else None
+        if state is None or state.state in {"unknown", "unavailable", "none", ""}:
+            return "정보 없음"
+        unit = state.attributes.get("unit_of_measurement", "")
+        if unit in {"°C", "°F"}:
+            return self._temperature(state.state, unit)
+        return str(state.state) + str(unit)

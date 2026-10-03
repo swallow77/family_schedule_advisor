@@ -1,72 +1,116 @@
 # Family Schedule Advisor
 
-Home Assistant custom integration for family schedule based departure, transit, and outfit recommendations.
+Home Assistant 가족 일정 출발·준비·날씨 안내 통합입니다. 여러 캘린더의 일정을 함께 읽고, 가족별 이동 경로와 준비 시간을 계산해 알림을 보냅니다.
 
-## Features
+## 0.4.0 주요 변경
 
-- Select multiple `calendar.*` or legacy `sensor.calendar_*` entities from the setup screen.
-- Supports multiple Google Calendar accounts/calendars at the same time.
-- Shows the raw recognized event in `sensor.family_schedule_advisor_recognized_event`.
-- Extracts destination from event title/location, with optional Ollama based destination extraction.
-- Calculates public transit duration with Google Directions API.
-- Calculates recommended preparation and departure times.
-- Generates a Korean TTS friendly outfit recommendation with Ollama.
-- Sends the message through `script.universal_notify`.
-- Provides buttons for recalculation and test notification.
-- Shows debug/status sensors for last action and last notification result.
+- 시간 설정은 **슬라이더 대신 숫자 입력칸**입니다. 준비·도착 여유시간, 조회 범위, 재조회 간격, 조용한 시간, 다시 알림 간격, 가족별 시간 설정에 모두 적용됩니다.
+- 일정마다 알림을 독립적으로 예약합니다. 늦게 시작하는 장거리 약속의 준비 시간이 더 빠른 경우도 처리합니다.
+- Home Assistant가 재시작되어 알림 시각을 놓쳤지만 일정이 아직 시작하지 않았다면 즉시 보완 알림을 예약합니다.
+- `calendar.*`와 기존 `sensor.*` 일정을 함께 수집합니다. 제목·시각이 같고 장소가 일치하거나 한쪽 장소가 없는 공유 일정은 중복을 정리합니다. 서로 다른 장소의 일정은 보존합니다.
+- 대중교통은 API가 반환한 실제 출발 시각을 사용합니다. 경로 조회 실패 시 임의의 60분 이동시간을 사용하지 않습니다.
+- 알림 서비스 실행 완료 후 이력을 저장합니다. 실패한 채널은 1분 간격으로 최대 3회 실행하고 성공한 채널은 반복하지 않습니다. 실제 단말에서 읽거나 들었는지는 보장하지 않습니다.
+- AI 옷차림 문장은 미리 생성합니다. 알림 시각에는 AI를 기다리지 않으며, AI가 없으면 시간·날씨에 따른 기본 안내를 보냅니다.
 
-## Installation
+## 설치와 업데이트
 
-Copy this folder into Home Assistant:
+Home Assistant **2026.1 이상**이 필요합니다. Home Assistant 2026.9.4를 대상으로 실제 모듈과 설정 화면 구조를 검증합니다.
 
-```text
-/config/custom_components/family_schedule_advisor
-```
-
-Restart Home Assistant, then add the integration from:
+HACS → 사용자 지정 저장소에서 아래 저장소를 `Integration`으로 추가하고 다운로드하세요.
 
 ```text
-Settings → Devices & services → Add integration → Family Schedule Advisor
+https://github.com/swallow77/family_schedule_advisor
 ```
 
-## Calendar selection
+수동 설치는 `custom_components/family_schedule_advisor` 폴더를 `/config/custom_components/`에 복사합니다.
 
-From version `0.2.5`, the calendar setting is no longer a plain text field. It is an entity selector, so you can choose multiple Gmail/Google Calendar entities directly from the UI.
+업데이트 후 **Home Assistant를 한 번 재시작**하세요. Python 파일 변경에는 재시작이 필요합니다. 기존 통합을 삭제하거나 다시 추가할 필요가 없습니다. 기존 옵션, 원래 센서/버튼의 고유 ID와 이전 알림 이력을 유지합니다.
 
-Recommended selection examples:
+## 설정
 
-```text
-calendar.family
-calendar.sdh7707_gmail_com
-sensor.calendar_gamil
-sensor.calendar_family
+설정 → 기기 및 서비스 → Family Schedule Advisor → 구성에서 아래 메뉴를 선택합니다. 설정 변경은 해당 메뉴의 값만 갱신하므로 다른 메뉴의 설정이 지워지지 않습니다.
+
+### 일정과 이동 설정
+
+- 캘린더·기존 일정 센서를 여러 개 선택하고 출발지 주소를 입력합니다.
+- 준비시간·도착 여유시간·조회 범위를 숫자로 입력합니다. 시간 값은 정수입니다.
+- 이동수단은 대중교통, 자동차, 도보를 지원합니다.
+- 경로 서비스는 기존 **Google Directions** 또는 신규 **Google Routes**를 선택합니다. Google Cloud에서 선택한 API와 결제를 활성화하고 제한된 API 키를 입력합니다. 기존 사용자에게는 Directions 설정을 유지합니다.
+- **직접 지정할 이동시간**은 경로 조회 실패 시 사용할 예상값입니다. 기본값 `0`에서는 출발 시각을 추측하지 않고 ‘경로 확인 필요’를 표시합니다. 지정값을 사용하면 안내에 직접 설정한 예상값임을 표시합니다.
+- 허용 시간은 **일정 시작 시각**을 필터링합니다. 음성 알림을 제한하려면 조용한 시간을 설정하세요. 시작이 종료보다 크면 자정을 넘는 구간입니다.
+- Ollama는 선택 사항입니다. URL이 없거나 서버가 응답하지 않아도 기본 안내가 동작합니다.
+
+### 장소 별칭
+
+‘회사’, ‘학교’, ‘부모님 댁’ 같은 별칭과 실제 주소를 저장합니다. 일정 제목이나 장소에서 별칭이 확인되면 저장한 주소를 우선 사용합니다. 기존 항목을 선택하면 수정·삭제할 수 있습니다.
+
+장소나 별칭이 없으면 선택적으로 AI가 목적지를 추출합니다. AI가 목적지를 찾지 못하면 제목 전체를 지도 검색에 넘기지 않습니다. 온라인 회의·화상 수업은 이동 경로 없이 준비 알림만 보냅니다.
+
+### 가족별 설정
+
+가족 이름, 캘린더, 출발지, 준비·도착 여유시간, 이동수단, 직접 지정한 이동시간, 휴대폰 알림 서비스, 스피커를 설정합니다.
+
+- 가족 캘린더는 기본 캘린더 목록에 없어도 함께 조회합니다.
+- 여러 가족이 같은 일정을 공유하면 각자의 준비시간과 알림 대상에 맞춰 처리합니다.
+- 가족 프로필이 매칭되지 않는 일정은 기본 설정을 사용합니다.
+- 선택적으로 `person.*` 또는 `device_tracker.*`를 지정하면 그 사람이 `home`일 때만 음성을 켭니다. 문자·휴대폰 알림은 유지합니다.
+
+### 알림과 음성
+
+기존 `script.universal_notify` 호출을 지원합니다. 다른 스크립트는 같은 입력 항목을 받아야 합니다.
+
+```yaml
+message: 안내문
+tts: true
+tts_target: media_player.example
+tts_service: tts.google_cloud_say
+tts_options:
+  speed: 0.9
+  pitch: -1.5
 ```
 
-Legacy comma text values from older versions are still accepted internally.
+휴대폰 알림 서비스를 `notify.mobile_app_my_phone` 형식으로 추가하면 아래 버튼과 지도 링크가 제공됩니다. Home Assistant Companion 앱이 필요합니다.
 
-## Important
+- **준비 완료**: 이 일정의 준비 알림을 완료 처리하고, 설정된 출발 알림은 유지합니다.
+- **출발했어요**: 이 일정의 남은 알림을 완료 처리합니다.
+- **다시 알림**: 지정한 분 뒤에 이 알림을 다시 보냅니다. 일정 시작 이후로 미룰 수 없습니다.
+- **이 일정 건너뛰기**: 이 일정만 건너뜁니다. 다른 일정은 유지합니다.
 
-Do not hard-code Google API keys in files. Enter the key from the integration configuration screen and restrict the key in Google Cloud.
+조용한 시간에는 스크립트에 `tts: false`를 전달합니다. 스크립트가 이 값을 존중해야 하며 문자 채널은 유지됩니다. 시작·종료 시간이 같으면 하루 종일 음성을 끕니다. 출발 시각 추가 알림은 기본적으로 꺼져 있어 기존 알림 횟수를 유지합니다.
 
-## Main entities
+통합의 기본 버튼과 서비스에도 준비 완료·출발 완료·다시 알림·건너뛰기를 제공합니다. 기본 버튼은 **현재 센서에 표시된 일정**에 적용됩니다. 휴대폰 버튼은 해당 알림의 일정에 정확히 적용됩니다.
 
-```text
-sensor.family_schedule_advisor_status
-sensor.family_schedule_advisor_next_event
-sensor.family_schedule_advisor_recognized_event
-sensor.family_schedule_advisor_event_time
-sensor.family_schedule_advisor_destination
-sensor.family_schedule_advisor_transit_duration
-sensor.family_schedule_advisor_departure_time
-sensor.family_schedule_advisor_notify_time
-sensor.family_schedule_advisor_route_status
-sensor.family_schedule_advisor_outfit_message
-sensor.family_schedule_advisor_last_action
-sensor.family_schedule_advisor_last_notify_result
-button.family_schedule_advisor_recalculate
-button.family_schedule_advisor_test_notify
+### 날씨와 시간별 예보
+
+시간별 예보를 지원하는 `weather.*`를 선택하면 출발부터 일정 종료까지의 예보를 사용합니다. 일정에 종료 시각이 없으면 시작 후 1시간까지 조회합니다. 지원되지 않으면 현재 날씨를 사용합니다. 기존 강수확률·체감온도·미세먼지 센서도 계속 지원합니다.
+
+선택한 날씨 엔티티의 위치를 사용합니다. 목적지별 날씨를 자동으로 조회하지는 않습니다.
+
+## 일정 요약과 자동화
+
+기존 센서 외에 다음 센서가 추가됩니다. 실제 엔티티 ID는 설치 시 생성된 값을 확인하세요.
+
+| 센서 | 내용 |
+| --- | --- |
+| 오늘 일정 | 오늘 일정 수. `events` 속성에 가족·장소·준비·출발 시각·지도 링크 제공 |
+| 일정 충돌 | 같은 가족의 일정 또는 이동시간이 겹치는 건수와 사유 |
+| 출발 시각 | 자동화에 사용할 수 있는 timestamp 센서 |
+| 준비 알림 시각 | 자동화에 사용할 수 있는 timestamp 센서 |
+
+상태 센서에는 조회 실패 캘린더, 예보 오류, 계획 수와 대기 알림 수가 표시됩니다. 긴 옷차림 안내는 상태 값을 255자 이내로 유지하고 `full_text` 속성에 전체 문장을 보관합니다.
+
+`examples/dashboard.yaml`에 별도 카드 설치가 필요 없는 일정 화면 예제를 제공합니다. 충돌 판단은 종료 시각이 있는 일정에 한하며, 서로 다른 가족의 일정은 충돌로 처리하지 않습니다.
+
+서비스: `family_schedule_advisor.recalculate`, `test_notify`, `mark_prepared`, `mark_departed`, `snooze`, `skip_event`. 동작 서비스에 `event_key`를 지정하면 특정 일정을 처리할 수 있습니다. 생략하면 현재 표시된 일정에 적용됩니다.
+
+한 번의 조회에서 최대 50개의 가족별 계획을 처리합니다. 초과 건수는 상태 속성에 표시합니다. 경로 결과는 15분간 재사용하며 수동 재계산은 캐시를 비웁니다.
+
+## 개발 검증
+
+```sh
+python -m pip install -r requirements-test.txt
+ruff check custom_components tests tools
+python -m pytest -q
 ```
 
-## Notes
-
-If an event is visible in `sensor.family_schedule_advisor_recognized_event` but the status is `필터됨`, check the configured allowed event hours. For example, a `02:00` event requires the minimum allowed event hour to be `0`.
+자동 테스트는 실제 일정·예약·알림 코드를 실행하고 Home Assistant 및 외부 API 경계만 대체합니다. CI는 Python 3.13/3.14 테스트, 실제 Home Assistant 패키지의 모듈·숫자 입력칸 검사, hassfest를 수행합니다. 실제 Google API 응답 품질·개별 스피커/휴대폰 전달 여부는 연결된 환경에서 확인해야 합니다.

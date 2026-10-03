@@ -11,11 +11,11 @@
           "google_api_key": "Google Directions API 키",
           "ollama_url": "Ollama URL",
           "ollama_model": "Ollama 모델명",
-          "prepare_minutes": "준비 여유시간 분",
-          "arrival_margin_minutes": "도착 여유시간 분",
-          "lookahead_hours": "일정 조회 범위 시간",
-          "min_event_hour": "알림 허용 시작 시간",
-          "max_event_hour": "알림 허용 종료 시간",
+          "prepare_minutes": "준비 여유시간 (분)",
+          "arrival_margin_minutes": "도착 여유시간 (분)",
+          "lookahead_hours": "일정 조회 범위 (시간)",
+          "min_event_hour": "일정 허용 시작 시간 (시)",
+          "max_event_hour": "일정 허용 종료 시간 (시)",
           "enable_ai_destination": "장소 없을 때 AI로 목적지 추출",
           "notify_script": "알림 스크립트",
           "tts_target": "TTS 대상",
@@ -30,29 +30,57 @@
           "weather_sky": "하늘상태 센서",
           "weather_dust": "초미세먼지 센서",
           "weather_uv": "자외선 센서",
-          "weather_apparent": "실시간 체감온도 센서"
+          "weather_apparent": "실시간 체감온도 센서",
+          "route_provider": "경로 조회 서비스",
+          "travel_mode": "이동수단",
+          "fallback_travel_minutes": "직접 지정할 이동시간 (분, 0이면 사용 안 함)",
+          "poll_minutes": "자동 재조회 간격 (분)",
+          "enable_outfit_ai": "AI 옷차림 안내 사용",
+          "departure_reminder": "출발 시각에 한 번 더 알림",
+          "mobile_notify_service": "휴대폰 알림 서비스",
+          "quiet_enabled": "조용한 시간 사용 (음성만 끔)",
+          "quiet_start": "조용한 시간 시작 (시)",
+          "quiet_end": "조용한 시간 종료 (시)",
+          "snooze_minutes": "다시 알림 간격 (분)",
+          "weather_entity": "시간별 예보 날씨 엔티티",
+          "alias": "장소 별칭",
+          "address": "실제 주소 또는 장소",
+          "delete": "이 항목 삭제",
+          "profile": "수정할 가족",
+          "name": "가족 이름",
+          "person_entity": "재실 확인 엔티티 (외출 중 음성 끔)"
         }
       }
     },
     "error": {
-      "required": "필수 항목입니다."
+      "required": "필수 항목입니다.",
+      "whole_number": "시간은 소수점 없이 정수로 입력하세요.",
+      "notify_service": "notify.mobile_app_휴대폰이름 형식으로 입력하세요.",
+      "invalid_url": "http:// 또는 https://로 시작하는 주소를 입력하세요.",
+      "duplicate_alias": "이미 저장된 별칭입니다."
+    },
+    "abort": {
+      "already_configured": "이미 설정되어 있습니다."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "가족 일정 출발 도우미 옵션",
+        "title": "설정할 항목 선택"
+      },
+      "general": {
+        "title": "일정과 이동 설정",
         "data": {
           "calendar_entities": "캘린더/센서 엔티티 목록",
           "origin_address": "출발지 주소",
           "google_api_key": "Google Directions API 키",
           "ollama_url": "Ollama URL",
           "ollama_model": "Ollama 모델명",
-          "prepare_minutes": "준비 여유시간 분",
-          "arrival_margin_minutes": "도착 여유시간 분",
-          "lookahead_hours": "일정 조회 범위 시간",
-          "min_event_hour": "알림 허용 시작 시간",
-          "max_event_hour": "알림 허용 종료 시간",
+          "prepare_minutes": "준비 여유시간 (분)",
+          "arrival_margin_minutes": "도착 여유시간 (분)",
+          "lookahead_hours": "일정 조회 범위 (시간)",
+          "min_event_hour": "일정 허용 시작 시간 (시)",
+          "max_event_hour": "일정 허용 종료 시간 (시)",
           "enable_ai_destination": "장소 없을 때 AI로 목적지 추출",
           "notify_script": "알림 스크립트",
           "tts_target": "TTS 대상",
@@ -67,30 +95,468 @@
           "weather_sky": "하늘상태 센서",
           "weather_dust": "초미세먼지 센서",
           "weather_uv": "자외선 센서",
-          "weather_apparent": "실시간 체감온도 센서"
+          "weather_apparent": "실시간 체감온도 센서",
+          "route_provider": "경로 조회 서비스",
+          "travel_mode": "이동수단",
+          "fallback_travel_minutes": "직접 지정할 이동시간 (분, 0이면 사용 안 함)",
+          "poll_minutes": "자동 재조회 간격 (분)",
+          "enable_outfit_ai": "AI 옷차림 안내 사용",
+          "departure_reminder": "출발 시각에 한 번 더 알림",
+          "mobile_notify_service": "휴대폰 알림 서비스",
+          "quiet_enabled": "조용한 시간 사용 (음성만 끔)",
+          "quiet_start": "조용한 시간 시작 (시)",
+          "quiet_end": "조용한 시간 종료 (시)",
+          "snooze_minutes": "다시 알림 간격 (분)",
+          "weather_entity": "시간별 예보 날씨 엔티티",
+          "alias": "장소 별칭",
+          "address": "실제 주소 또는 장소",
+          "delete": "이 항목 삭제",
+          "profile": "수정할 가족",
+          "name": "가족 이름",
+          "person_entity": "재실 확인 엔티티 (외출 중 음성 끔)"
+        },
+        "data_description": {
+          "fallback_travel_minutes": "경로 조회 실패 시 사용할 예상값입니다. 0이면 출발 시간을 추측하지 않습니다.",
+          "mobile_notify_service": "예: notify.mobile_app_my_phone. 준비 완료·출발·다시 알림 버튼을 보냅니다.",
+          "quiet_enabled": "문자 알림은 유지하고 음성 안내만 끕니다. 시작과 종료가 같으면 항상 조용합니다.",
+          "person_entity": "선택하면 집에 있을 때만 스피커로 안내합니다. 휴대폰 알림은 유지합니다.",
+          "weather_entity": "시간별 예보를 지원하는 weather 엔티티를 선택하세요. 예보가 없으면 현재 날씨를 사용합니다.",
+          "calendar_entities": "가족 설정의 캘린더는 기본 목록에 없어도 함께 조회됩니다."
+        }
+      },
+      "places": {
+        "title": "장소 별칭 관리",
+        "data": {
+          "calendar_entities": "캘린더/센서 엔티티 목록",
+          "origin_address": "출발지 주소",
+          "google_api_key": "Google Directions API 키",
+          "ollama_url": "Ollama URL",
+          "ollama_model": "Ollama 모델명",
+          "prepare_minutes": "준비 여유시간 (분)",
+          "arrival_margin_minutes": "도착 여유시간 (분)",
+          "lookahead_hours": "일정 조회 범위 (시간)",
+          "min_event_hour": "일정 허용 시작 시간 (시)",
+          "max_event_hour": "일정 허용 종료 시간 (시)",
+          "enable_ai_destination": "장소 없을 때 AI로 목적지 추출",
+          "notify_script": "알림 스크립트",
+          "tts_target": "TTS 대상",
+          "tts_service": "TTS 서비스",
+          "tts_speed": "TTS 속도",
+          "tts_pitch": "TTS 피치",
+          "weather_rain": "강수확률 센서",
+          "weather_feels_like": "체감온도 센서",
+          "weather_temp": "현재온도 센서",
+          "weather_humidity": "습도 센서",
+          "weather_wind": "풍속 센서",
+          "weather_sky": "하늘상태 센서",
+          "weather_dust": "초미세먼지 센서",
+          "weather_uv": "자외선 센서",
+          "weather_apparent": "실시간 체감온도 센서",
+          "route_provider": "경로 조회 서비스",
+          "travel_mode": "이동수단",
+          "fallback_travel_minutes": "직접 지정할 이동시간 (분, 0이면 사용 안 함)",
+          "poll_minutes": "자동 재조회 간격 (분)",
+          "enable_outfit_ai": "AI 옷차림 안내 사용",
+          "departure_reminder": "출발 시각에 한 번 더 알림",
+          "mobile_notify_service": "휴대폰 알림 서비스",
+          "quiet_enabled": "조용한 시간 사용 (음성만 끔)",
+          "quiet_start": "조용한 시간 시작 (시)",
+          "quiet_end": "조용한 시간 종료 (시)",
+          "snooze_minutes": "다시 알림 간격 (분)",
+          "weather_entity": "시간별 예보 날씨 엔티티",
+          "alias": "장소 별칭",
+          "address": "실제 주소 또는 장소",
+          "delete": "이 항목 삭제",
+          "profile": "수정할 가족",
+          "name": "가족 이름",
+          "person_entity": "재실 확인 엔티티 (외출 중 음성 끔)"
+        },
+        "data_description": {
+          "fallback_travel_minutes": "경로 조회 실패 시 사용할 예상값입니다. 0이면 출발 시간을 추측하지 않습니다.",
+          "mobile_notify_service": "예: notify.mobile_app_my_phone. 준비 완료·출발·다시 알림 버튼을 보냅니다.",
+          "quiet_enabled": "문자 알림은 유지하고 음성 안내만 끕니다. 시작과 종료가 같으면 항상 조용합니다.",
+          "person_entity": "선택하면 집에 있을 때만 스피커로 안내합니다. 휴대폰 알림은 유지합니다.",
+          "weather_entity": "시간별 예보를 지원하는 weather 엔티티를 선택하세요. 예보가 없으면 현재 날씨를 사용합니다.",
+          "calendar_entities": "가족 설정의 캘린더는 기본 목록에 없어도 함께 조회됩니다."
+        }
+      },
+      "place_edit": {
+        "title": "장소 추가 또는 수정",
+        "data": {
+          "calendar_entities": "캘린더/센서 엔티티 목록",
+          "origin_address": "출발지 주소",
+          "google_api_key": "Google Directions API 키",
+          "ollama_url": "Ollama URL",
+          "ollama_model": "Ollama 모델명",
+          "prepare_minutes": "준비 여유시간 (분)",
+          "arrival_margin_minutes": "도착 여유시간 (분)",
+          "lookahead_hours": "일정 조회 범위 (시간)",
+          "min_event_hour": "일정 허용 시작 시간 (시)",
+          "max_event_hour": "일정 허용 종료 시간 (시)",
+          "enable_ai_destination": "장소 없을 때 AI로 목적지 추출",
+          "notify_script": "알림 스크립트",
+          "tts_target": "TTS 대상",
+          "tts_service": "TTS 서비스",
+          "tts_speed": "TTS 속도",
+          "tts_pitch": "TTS 피치",
+          "weather_rain": "강수확률 센서",
+          "weather_feels_like": "체감온도 센서",
+          "weather_temp": "현재온도 센서",
+          "weather_humidity": "습도 센서",
+          "weather_wind": "풍속 센서",
+          "weather_sky": "하늘상태 센서",
+          "weather_dust": "초미세먼지 센서",
+          "weather_uv": "자외선 센서",
+          "weather_apparent": "실시간 체감온도 센서",
+          "route_provider": "경로 조회 서비스",
+          "travel_mode": "이동수단",
+          "fallback_travel_minutes": "직접 지정할 이동시간 (분, 0이면 사용 안 함)",
+          "poll_minutes": "자동 재조회 간격 (분)",
+          "enable_outfit_ai": "AI 옷차림 안내 사용",
+          "departure_reminder": "출발 시각에 한 번 더 알림",
+          "mobile_notify_service": "휴대폰 알림 서비스",
+          "quiet_enabled": "조용한 시간 사용 (음성만 끔)",
+          "quiet_start": "조용한 시간 시작 (시)",
+          "quiet_end": "조용한 시간 종료 (시)",
+          "snooze_minutes": "다시 알림 간격 (분)",
+          "weather_entity": "시간별 예보 날씨 엔티티",
+          "alias": "장소 별칭",
+          "address": "실제 주소 또는 장소",
+          "delete": "이 항목 삭제",
+          "profile": "수정할 가족",
+          "name": "가족 이름",
+          "person_entity": "재실 확인 엔티티 (외출 중 음성 끔)"
+        },
+        "data_description": {
+          "fallback_travel_minutes": "경로 조회 실패 시 사용할 예상값입니다. 0이면 출발 시간을 추측하지 않습니다.",
+          "mobile_notify_service": "예: notify.mobile_app_my_phone. 준비 완료·출발·다시 알림 버튼을 보냅니다.",
+          "quiet_enabled": "문자 알림은 유지하고 음성 안내만 끕니다. 시작과 종료가 같으면 항상 조용합니다.",
+          "person_entity": "선택하면 집에 있을 때만 스피커로 안내합니다. 휴대폰 알림은 유지합니다.",
+          "weather_entity": "시간별 예보를 지원하는 weather 엔티티를 선택하세요. 예보가 없으면 현재 날씨를 사용합니다.",
+          "calendar_entities": "가족 설정의 캘린더는 기본 목록에 없어도 함께 조회됩니다."
+        }
+      },
+      "profiles": {
+        "title": "가족별 설정",
+        "data": {
+          "calendar_entities": "캘린더/센서 엔티티 목록",
+          "origin_address": "출발지 주소",
+          "google_api_key": "Google Directions API 키",
+          "ollama_url": "Ollama URL",
+          "ollama_model": "Ollama 모델명",
+          "prepare_minutes": "준비 여유시간 (분)",
+          "arrival_margin_minutes": "도착 여유시간 (분)",
+          "lookahead_hours": "일정 조회 범위 (시간)",
+          "min_event_hour": "일정 허용 시작 시간 (시)",
+          "max_event_hour": "일정 허용 종료 시간 (시)",
+          "enable_ai_destination": "장소 없을 때 AI로 목적지 추출",
+          "notify_script": "알림 스크립트",
+          "tts_target": "TTS 대상",
+          "tts_service": "TTS 서비스",
+          "tts_speed": "TTS 속도",
+          "tts_pitch": "TTS 피치",
+          "weather_rain": "강수확률 센서",
+          "weather_feels_like": "체감온도 센서",
+          "weather_temp": "현재온도 센서",
+          "weather_humidity": "습도 센서",
+          "weather_wind": "풍속 센서",
+          "weather_sky": "하늘상태 센서",
+          "weather_dust": "초미세먼지 센서",
+          "weather_uv": "자외선 센서",
+          "weather_apparent": "실시간 체감온도 센서",
+          "route_provider": "경로 조회 서비스",
+          "travel_mode": "이동수단",
+          "fallback_travel_minutes": "직접 지정할 이동시간 (분, 0이면 사용 안 함)",
+          "poll_minutes": "자동 재조회 간격 (분)",
+          "enable_outfit_ai": "AI 옷차림 안내 사용",
+          "departure_reminder": "출발 시각에 한 번 더 알림",
+          "mobile_notify_service": "휴대폰 알림 서비스",
+          "quiet_enabled": "조용한 시간 사용 (음성만 끔)",
+          "quiet_start": "조용한 시간 시작 (시)",
+          "quiet_end": "조용한 시간 종료 (시)",
+          "snooze_minutes": "다시 알림 간격 (분)",
+          "weather_entity": "시간별 예보 날씨 엔티티",
+          "alias": "장소 별칭",
+          "address": "실제 주소 또는 장소",
+          "delete": "이 항목 삭제",
+          "profile": "수정할 가족",
+          "name": "가족 이름",
+          "person_entity": "재실 확인 엔티티 (외출 중 음성 끔)"
+        },
+        "data_description": {
+          "fallback_travel_minutes": "경로 조회 실패 시 사용할 예상값입니다. 0이면 출발 시간을 추측하지 않습니다.",
+          "mobile_notify_service": "예: notify.mobile_app_my_phone. 준비 완료·출발·다시 알림 버튼을 보냅니다.",
+          "quiet_enabled": "문자 알림은 유지하고 음성 안내만 끕니다. 시작과 종료가 같으면 항상 조용합니다.",
+          "person_entity": "선택하면 집에 있을 때만 스피커로 안내합니다. 휴대폰 알림은 유지합니다.",
+          "weather_entity": "시간별 예보를 지원하는 weather 엔티티를 선택하세요. 예보가 없으면 현재 날씨를 사용합니다.",
+          "calendar_entities": "가족 설정의 캘린더는 기본 목록에 없어도 함께 조회됩니다."
+        }
+      },
+      "profile_edit": {
+        "title": "가족 추가 또는 수정",
+        "data": {
+          "calendar_entities": "캘린더/센서 엔티티 목록",
+          "origin_address": "출발지 주소",
+          "google_api_key": "Google Directions API 키",
+          "ollama_url": "Ollama URL",
+          "ollama_model": "Ollama 모델명",
+          "prepare_minutes": "준비 여유시간 (분)",
+          "arrival_margin_minutes": "도착 여유시간 (분)",
+          "lookahead_hours": "일정 조회 범위 (시간)",
+          "min_event_hour": "일정 허용 시작 시간 (시)",
+          "max_event_hour": "일정 허용 종료 시간 (시)",
+          "enable_ai_destination": "장소 없을 때 AI로 목적지 추출",
+          "notify_script": "알림 스크립트",
+          "tts_target": "TTS 대상",
+          "tts_service": "TTS 서비스",
+          "tts_speed": "TTS 속도",
+          "tts_pitch": "TTS 피치",
+          "weather_rain": "강수확률 센서",
+          "weather_feels_like": "체감온도 센서",
+          "weather_temp": "현재온도 센서",
+          "weather_humidity": "습도 센서",
+          "weather_wind": "풍속 센서",
+          "weather_sky": "하늘상태 센서",
+          "weather_dust": "초미세먼지 센서",
+          "weather_uv": "자외선 센서",
+          "weather_apparent": "실시간 체감온도 센서",
+          "route_provider": "경로 조회 서비스",
+          "travel_mode": "이동수단",
+          "fallback_travel_minutes": "직접 지정할 이동시간 (분, 0이면 사용 안 함)",
+          "poll_minutes": "자동 재조회 간격 (분)",
+          "enable_outfit_ai": "AI 옷차림 안내 사용",
+          "departure_reminder": "출발 시각에 한 번 더 알림",
+          "mobile_notify_service": "휴대폰 알림 서비스",
+          "quiet_enabled": "조용한 시간 사용 (음성만 끔)",
+          "quiet_start": "조용한 시간 시작 (시)",
+          "quiet_end": "조용한 시간 종료 (시)",
+          "snooze_minutes": "다시 알림 간격 (분)",
+          "weather_entity": "시간별 예보 날씨 엔티티",
+          "alias": "장소 별칭",
+          "address": "실제 주소 또는 장소",
+          "delete": "이 항목 삭제",
+          "profile": "수정할 가족",
+          "name": "가족 이름",
+          "person_entity": "재실 확인 엔티티 (외출 중 음성 끔)"
+        },
+        "data_description": {
+          "fallback_travel_minutes": "경로 조회 실패 시 사용할 예상값입니다. 0이면 출발 시간을 추측하지 않습니다.",
+          "mobile_notify_service": "예: notify.mobile_app_my_phone. 준비 완료·출발·다시 알림 버튼을 보냅니다.",
+          "quiet_enabled": "문자 알림은 유지하고 음성 안내만 끕니다. 시작과 종료가 같으면 항상 조용합니다.",
+          "person_entity": "선택하면 집에 있을 때만 스피커로 안내합니다. 휴대폰 알림은 유지합니다.",
+          "weather_entity": "시간별 예보를 지원하는 weather 엔티티를 선택하세요. 예보가 없으면 현재 날씨를 사용합니다.",
+          "calendar_entities": "가족 설정의 캘린더는 기본 목록에 없어도 함께 조회됩니다."
+        }
+      },
+      "notifications": {
+        "title": "알림과 음성 설정",
+        "data": {
+          "calendar_entities": "캘린더/센서 엔티티 목록",
+          "origin_address": "출발지 주소",
+          "google_api_key": "Google Directions API 키",
+          "ollama_url": "Ollama URL",
+          "ollama_model": "Ollama 모델명",
+          "prepare_minutes": "준비 여유시간 (분)",
+          "arrival_margin_minutes": "도착 여유시간 (분)",
+          "lookahead_hours": "일정 조회 범위 (시간)",
+          "min_event_hour": "일정 허용 시작 시간 (시)",
+          "max_event_hour": "일정 허용 종료 시간 (시)",
+          "enable_ai_destination": "장소 없을 때 AI로 목적지 추출",
+          "notify_script": "알림 스크립트",
+          "tts_target": "TTS 대상",
+          "tts_service": "TTS 서비스",
+          "tts_speed": "TTS 속도",
+          "tts_pitch": "TTS 피치",
+          "weather_rain": "강수확률 센서",
+          "weather_feels_like": "체감온도 센서",
+          "weather_temp": "현재온도 센서",
+          "weather_humidity": "습도 센서",
+          "weather_wind": "풍속 센서",
+          "weather_sky": "하늘상태 센서",
+          "weather_dust": "초미세먼지 센서",
+          "weather_uv": "자외선 센서",
+          "weather_apparent": "실시간 체감온도 센서",
+          "route_provider": "경로 조회 서비스",
+          "travel_mode": "이동수단",
+          "fallback_travel_minutes": "직접 지정할 이동시간 (분, 0이면 사용 안 함)",
+          "poll_minutes": "자동 재조회 간격 (분)",
+          "enable_outfit_ai": "AI 옷차림 안내 사용",
+          "departure_reminder": "출발 시각에 한 번 더 알림",
+          "mobile_notify_service": "휴대폰 알림 서비스",
+          "quiet_enabled": "조용한 시간 사용 (음성만 끔)",
+          "quiet_start": "조용한 시간 시작 (시)",
+          "quiet_end": "조용한 시간 종료 (시)",
+          "snooze_minutes": "다시 알림 간격 (분)",
+          "weather_entity": "시간별 예보 날씨 엔티티",
+          "alias": "장소 별칭",
+          "address": "실제 주소 또는 장소",
+          "delete": "이 항목 삭제",
+          "profile": "수정할 가족",
+          "name": "가족 이름",
+          "person_entity": "재실 확인 엔티티 (외출 중 음성 끔)"
+        },
+        "data_description": {
+          "fallback_travel_minutes": "경로 조회 실패 시 사용할 예상값입니다. 0이면 출발 시간을 추측하지 않습니다.",
+          "mobile_notify_service": "예: notify.mobile_app_my_phone. 준비 완료·출발·다시 알림 버튼을 보냅니다.",
+          "quiet_enabled": "문자 알림은 유지하고 음성 안내만 끕니다. 시작과 종료가 같으면 항상 조용합니다.",
+          "person_entity": "선택하면 집에 있을 때만 스피커로 안내합니다. 휴대폰 알림은 유지합니다.",
+          "weather_entity": "시간별 예보를 지원하는 weather 엔티티를 선택하세요. 예보가 없으면 현재 날씨를 사용합니다.",
+          "calendar_entities": "가족 설정의 캘린더는 기본 목록에 없어도 함께 조회됩니다."
+        }
+      },
+      "weather": {
+        "title": "날씨와 시간별 예보",
+        "data": {
+          "calendar_entities": "캘린더/센서 엔티티 목록",
+          "origin_address": "출발지 주소",
+          "google_api_key": "Google Directions API 키",
+          "ollama_url": "Ollama URL",
+          "ollama_model": "Ollama 모델명",
+          "prepare_minutes": "준비 여유시간 (분)",
+          "arrival_margin_minutes": "도착 여유시간 (분)",
+          "lookahead_hours": "일정 조회 범위 (시간)",
+          "min_event_hour": "일정 허용 시작 시간 (시)",
+          "max_event_hour": "일정 허용 종료 시간 (시)",
+          "enable_ai_destination": "장소 없을 때 AI로 목적지 추출",
+          "notify_script": "알림 스크립트",
+          "tts_target": "TTS 대상",
+          "tts_service": "TTS 서비스",
+          "tts_speed": "TTS 속도",
+          "tts_pitch": "TTS 피치",
+          "weather_rain": "강수확률 센서",
+          "weather_feels_like": "체감온도 센서",
+          "weather_temp": "현재온도 센서",
+          "weather_humidity": "습도 센서",
+          "weather_wind": "풍속 센서",
+          "weather_sky": "하늘상태 센서",
+          "weather_dust": "초미세먼지 센서",
+          "weather_uv": "자외선 센서",
+          "weather_apparent": "실시간 체감온도 센서",
+          "route_provider": "경로 조회 서비스",
+          "travel_mode": "이동수단",
+          "fallback_travel_minutes": "직접 지정할 이동시간 (분, 0이면 사용 안 함)",
+          "poll_minutes": "자동 재조회 간격 (분)",
+          "enable_outfit_ai": "AI 옷차림 안내 사용",
+          "departure_reminder": "출발 시각에 한 번 더 알림",
+          "mobile_notify_service": "휴대폰 알림 서비스",
+          "quiet_enabled": "조용한 시간 사용 (음성만 끔)",
+          "quiet_start": "조용한 시간 시작 (시)",
+          "quiet_end": "조용한 시간 종료 (시)",
+          "snooze_minutes": "다시 알림 간격 (분)",
+          "weather_entity": "시간별 예보 날씨 엔티티",
+          "alias": "장소 별칭",
+          "address": "실제 주소 또는 장소",
+          "delete": "이 항목 삭제",
+          "profile": "수정할 가족",
+          "name": "가족 이름",
+          "person_entity": "재실 확인 엔티티 (외출 중 음성 끔)"
+        },
+        "data_description": {
+          "fallback_travel_minutes": "경로 조회 실패 시 사용할 예상값입니다. 0이면 출발 시간을 추측하지 않습니다.",
+          "mobile_notify_service": "예: notify.mobile_app_my_phone. 준비 완료·출발·다시 알림 버튼을 보냅니다.",
+          "quiet_enabled": "문자 알림은 유지하고 음성 안내만 끕니다. 시작과 종료가 같으면 항상 조용합니다.",
+          "person_entity": "선택하면 집에 있을 때만 스피커로 안내합니다. 휴대폰 알림은 유지합니다.",
+          "weather_entity": "시간별 예보를 지원하는 weather 엔티티를 선택하세요. 예보가 없으면 현재 날씨를 사용합니다.",
+          "calendar_entities": "가족 설정의 캘린더는 기본 목록에 없어도 함께 조회됩니다."
         }
       }
+    },
+    "error": {
+      "required": "필수 항목입니다.",
+      "whole_number": "시간은 소수점 없이 정수로 입력하세요.",
+      "notify_service": "notify.mobile_app_휴대폰이름 형식으로 입력하세요.",
+      "invalid_url": "http:// 또는 https://로 시작하는 주소를 입력하세요.",
+      "duplicate_alias": "이미 저장된 별칭입니다."
     }
   },
   "entity": {
     "sensor": {
-      "status": {"name": "상태"},
-      "next_event": {"name": "다음 일정"},
-      "event_time": {"name": "일정 시간"},
-      "destination": {"name": "목적지"},
-      "transit_duration": {"name": "대중교통 소요시간"},
-      "route_summary": {"name": "대중교통 이용방법"},
-      "departure_time": {"name": "추천 출발 시간"},
-      "notify_time": {"name": "추천 준비 알림 시간"},
-      "route_status": {"name": "경로 상태"},
-      "outfit_message": {"name": "옷차림 안내문"},
-      "recognized_event": {"name": "인식한 일정"},
-      "last_action": {"name": "마지막 동작"},
-      "last_notify_result": {"name": "마지막 알림 결과"}
+      "status": {
+        "name": "상태"
+      },
+      "next_event": {
+        "name": "다음 일정"
+      },
+      "event_time": {
+        "name": "일정 시간"
+      },
+      "destination": {
+        "name": "목적지"
+      },
+      "transit_duration": {
+        "name": "대중교통 소요시간"
+      },
+      "route_summary": {
+        "name": "대중교통 이용방법"
+      },
+      "departure_time": {
+        "name": "추천 출발 시간"
+      },
+      "notify_time": {
+        "name": "추천 준비 알림 시간"
+      },
+      "route_status": {
+        "name": "경로 상태"
+      },
+      "outfit_message": {
+        "name": "옷차림 안내문"
+      },
+      "recognized_event": {
+        "name": "인식한 일정"
+      },
+      "last_action": {
+        "name": "마지막 동작"
+      },
+      "last_notify_result": {
+        "name": "마지막 알림 결과"
+      },
+      "today_schedule": {
+        "name": "오늘 일정"
+      },
+      "schedule_conflicts": {
+        "name": "일정 충돌"
+      },
+      "departure_timestamp": {
+        "name": "출발 시각"
+      },
+      "notify_timestamp": {
+        "name": "준비 알림 시각"
+      }
     },
     "button": {
-      "recalculate": {"name": "일정 다시 계산"},
-      "test_notify": {"name": "테스트 알림"}
+      "recalculate": {
+        "name": "일정 다시 계산"
+      },
+      "test_notify": {
+        "name": "테스트 알림"
+      },
+      "mark_prepared": {
+        "name": "준비 완료"
+      },
+      "mark_departed": {
+        "name": "출발 완료"
+      },
+      "snooze": {
+        "name": "다시 알림"
+      },
+      "skip_event": {
+        "name": "일정 알림 건너뛰기"
+      }
+    }
+  },
+  "selector": {
+    "travel_mode": {
+      "options": {
+        "transit": "대중교통",
+        "driving": "자동차",
+        "walking": "도보"
+      }
+    },
+    "route_provider": {
+      "options": {
+        "directions": "Google Directions (기존)",
+        "routes": "Google Routes (신규)"
+      }
     }
   }
 }

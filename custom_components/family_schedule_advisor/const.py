@@ -1,11 +1,12 @@
 """Constants for Family Schedule Advisor."""
+
 from __future__ import annotations
 
 from homeassistant.const import Platform
 
 DOMAIN = "family_schedule_advisor"
 NAME = "Family Schedule Advisor"
-VERSION = "0.3.1"
+VERSION = "0.4.0"
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
 
@@ -52,3 +53,25 @@ DEFAULT_MAX_EVENT_HOUR = 23
 
 STORAGE_VERSION = 1
 STORAGE_KEY = f"{DOMAIN}.storage"
+
+# New options have defaults so existing entries keep working without migration.
+CONF_TRAVEL_MODE = "travel_mode"
+CONF_ROUTE_PROVIDER = "route_provider"
+CONF_FALLBACK_TRAVEL_MINUTES = "fallback_travel_minutes"
+CONF_POLL_MINUTES = "poll_minutes"
+CONF_ENABLE_OUTFIT_AI = "enable_outfit_ai"
+CONF_DEPARTURE_REMINDER = "departure_reminder"
+CONF_MOBILE_NOTIFY_SERVICE = "mobile_notify_service"
+CONF_QUIET_ENABLED = "quiet_enabled"
+CONF_QUIET_START = "quiet_start"
+CONF_QUIET_END = "quiet_end"
+CONF_SNOOZE_MINUTES = "snooze_minutes"
+CONF_WEATHER_ENTITY = "weather_entity"
+CONF_PLACE_ALIASES = "place_aliases"
+CONF_FAMILY_PROFILES = "family_profiles"
+DEFAULT_TRAVEL_MODE = "transit"
+DEFAULT_ROUTE_PROVIDER = "directions"
+DEFAULT_POLL_MINUTES = 5
+DEFAULT_SNOOZE_MINUTES = 10
+MAX_PLANS = 50
+ROUTE_CACHE_MINUTES = 15

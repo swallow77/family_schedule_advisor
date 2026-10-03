@@ -1,10 +1,12 @@
 """Google Directions API helper."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import html
 import logging
 import re
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 import aiohttp
@@ -27,6 +29,8 @@ class TransitResult:
     route_steps: list[str] = field(default_factory=list)
     status: str = "OK"
     error_message: str = ""
+    departure_time: datetime | None = None
+    arrival_time: datetime | None = None
 
 
 def _clean_text(value: Any) -> str:
@@ -34,7 +38,7 @@ def _clean_text(value: Any) -> str:
     if value is None:
         return ""
     text = html.unescape(str(value))
-    text = text.replace("<div style=\"font-size:0.9em\">", " ")
+    text = text.replace('<div style="font-size:0.9em">', " ")
     text = text.replace("</div>", " ")
     text = _TAG_RE.sub("", text)
     return " ".join(text.split()).strip()
@@ -67,7 +71,9 @@ def _format_route_step(index: int, step: dict[str, Any]) -> str:
         headsign = str(details.get("headsign") or "").strip()
         stops = details.get("num_stops")
 
-        parts = [f"{index}. {vehicle_name} {line_name}: {departure_stop} 승차 → {arrival_stop} 하차"]
+        parts = [
+            f"{index}. {vehicle_name} {line_name}: {departure_stop} 승차 → {arrival_stop} 하차"
+        ]
         extra: list[str] = []
         if headsign:
             extra.append(f"방면 {headsign}")
@@ -107,6 +113,7 @@ async def async_get_transit_duration(
     origin: str,
     destination: str,
     arrival_time,
+    mode: str = "transit",
 ) -> TransitResult | None:
     """Fetch public transit duration and route steps from Google Directions API."""
     if not api_key or not origin or not destination:
@@ -115,19 +122,23 @@ async def async_get_transit_duration(
     params: dict[str, Any] = {
         "origin": origin,
         "destination": destination,
-        "mode": "transit",
-        "arrival_time": int(arrival_time.timestamp()),
+        "mode": mode,
         "language": "ko",
         "region": "kr",
         "key": api_key,
     }
+    if mode == "transit":
+        params["arrival_time"] = int(arrival_time.timestamp())
 
     try:
-        async with session.get(DIRECTIONS_URL, params=params, timeout=aiohttp.ClientTimeout(total=25)) as resp:
+        async with session.get(
+            DIRECTIONS_URL, params=params, timeout=aiohttp.ClientTimeout(total=25)
+        ) as resp:
             data = await resp.json(content_type=None)
     except (aiohttp.ClientError, TimeoutError, ValueError) as err:
-        _LOGGER.warning("Google Directions request failed: %s", err)
-        return TransitResult(0, "", status="ERROR", error_message=str(err))
+        # Exception URLs can contain the API key. Do not persist/log them.
+        _LOGGER.warning("Google Directions request failed (%s)", type(err).__name__)
+        return TransitResult(0, "", status="ERROR", error_message="경로 서비스 연결 실패")
 
     status = data.get("status", "UNKNOWN")
     if status != "OK":
@@ -156,4 +167,13 @@ async def async_get_transit_duration(
         route_summary="\n".join(route_steps),
         route_steps=route_steps,
         status="OK",
+        departure_time=_google_time(leg.get("departure_time")),
+        arrival_time=_google_time(leg.get("arrival_time")),
     )
+
+
+def _google_time(value: dict | None) -> datetime | None:
+    try:
+        return datetime.fromtimestamp(float(value["value"]), timezone.utc) if value else None
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
