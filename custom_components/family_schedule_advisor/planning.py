@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from .calendar_parser import EventInfo
+from .const import DEFAULT_UNRESOLVED_REMINDER_MINUTES
 
 _VIRTUAL = re.compile(
     r"(?<![\w])(?:온라인|화상|재택|비대면)(?=\W|$|회의|수업|근무)|(?:\bzoom\b)|(?:\bteams\b)|meet\.google|zoom\.us|teams\.microsoft",
@@ -84,8 +85,14 @@ class Plan:
             self.estimated = True
         else:
             self.status = "경로 확인 필요" if self.destination else "장소 확인 필요"
-        # Unknown routes get an appointment reminder, never a fabricated departure.
-        self.notify_time = (self.departure_time or target) - timedelta(minutes=prepare)
+        # A location conversation never delays the appointment reminder. When
+        # departure is unknown, the deadline is exactly one hour before start;
+        # preparation and arrival margins are not subtracted a second time.
+        self.notify_time = (
+            self.departure_time - timedelta(minutes=prepare)
+            if self.departure_time is not None
+            else self.event.start - timedelta(minutes=DEFAULT_UNRESOLVED_REMINDER_MINUTES)
+        )
 
     def as_data(self) -> dict[str, Any]:
         route = self.route
