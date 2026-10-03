@@ -66,7 +66,15 @@
   "options": {
     "step": {
       "init": {
-        "title": "설정할 항목 선택"
+        "title": "설정할 항목 선택",
+        "menu_options": {
+          "general": "일반 설정 · 일정과 이동시간",
+          "places": "장소 별칭 관리",
+          "profiles": "가족 구성원 설정",
+          "notifications": "알림과 음성 설정",
+          "weather": "날씨 설정",
+          "telegram": "텔레그램 장소 확인"
+        }
       },
       "general": {
         "title": "일정과 이동 설정",
@@ -459,6 +467,17 @@
           "weather_entity": "시간별 예보를 지원하는 weather 엔티티를 선택하세요. 예보가 없으면 현재 날씨를 사용합니다.",
           "calendar_entities": "가족 설정의 캘린더는 기본 목록에 없어도 함께 조회됩니다."
         }
+      },
+      "telegram": {
+        "title": "텔레그램으로 일정 장소 확인",
+        "description": "같은 봇의 개인 채팅 알림과 업데이트 이벤트를 선택하세요. 장소를 입력한 뒤 확인이라고 답장하면 적용합니다. 캘린더 저장 실패 시에도 계산에 장소를 유지합니다.",
+        "data": {
+          "telegram_location_enabled": "장소 확인 대화 사용",
+          "telegram_notify_entity": "텔레그램 개인 채팅 알림",
+          "telegram_event_entity": "같은 봇의 업데이트 이벤트",
+          "telegram_write_calendar": "확인한 장소를 캘린더에 저장",
+          "telegram_request_hours": "장소를 물어볼 일정 범위 (시간)"
+        }
       }
     },
     "error": {
@@ -466,7 +485,8 @@
       "whole_number": "시간은 소수점 없이 정수로 입력하세요.",
       "notify_service": "notify.mobile_app_휴대폰이름 형식으로 입력하세요.",
       "invalid_url": "http:// 또는 https://로 시작하는 주소를 입력하세요.",
-      "duplicate_alias": "이미 저장된 별칭입니다."
+      "duplicate_alias": "이미 저장된 별칭입니다.",
+      "telegram_target": "같은 텔레그램 봇의 활성화된 개인 채팅 알림과 업데이트 이벤트를 선택하고 시간을 정수로 입력해 주세요."
     }
   },
   "entity": {

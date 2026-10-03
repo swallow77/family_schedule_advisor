@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0
+
+- Restore visible names for every options menu item in Korean and English.
+- Optional Telegram location questions with a route preview and explicit confirmation.
+- Match replies to the exact question, selected bot and private chat; preserve pending conversations across restart.
+- Apply confirmed locations to every matching family profile and preserve reminder receipts when calendar location changes.
+- Optionally save only the location of a freshly matched Google Calendar occurrence using its existing authenticated integration. Native editable calendars are also supported; ambiguous/changed/read-only events are never overwritten.
+- Report calendar write failures while retaining the confirmed location for departure calculation.
+- Add regression tests for conversation routing, retries, expiry, cancellation, duplicate replies, calendar preservation and recurring Google instance IDs.
+
 ## 0.4.0
 
 - Explicit number boxes for every time/duration option, including family profiles.

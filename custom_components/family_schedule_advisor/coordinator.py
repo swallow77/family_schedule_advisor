@@ -45,6 +45,7 @@ from .planning import (
     is_virtual,
     resolve_alias,
 )
+from .telegram_location import TelegramLocationConversation
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -91,6 +92,7 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._state_save_lock = asyncio.Lock()
         self._last_message = ""
         self._last_message_event_key = ""
+        self.telegram = TelegramLocationConversation(self)
 
     @property
     def config(self) -> dict[str, Any]:
@@ -112,6 +114,9 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._done = dict(stored.get("done", {}))
             self._snoozed = dict(stored.get("snoozed", {}))
             self._legacy_notified = list(stored.get("legacy_notified", []))
+            self.telegram.restore(stored.get("telegram", {}))
+            if self.telegram.overrides:
+                await self.async_request_refresh()
         entities = self._calendar_entities()
 
         @callback
@@ -124,6 +129,7 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._unsubs.append(
             self.hass.bus.async_listen("mobile_app_notification_action", self._mobile_action)
         )
+        self._unsubs.extend(self.telegram.start())
         self._started = True
         self._publish()
 
@@ -178,7 +184,10 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             int(cfg.get(c.CONF_MAX_EVENT_HOUR, c.DEFAULT_MAX_EVENT_HOUR)),
             errors=failures,
         )
-        accepted = [item.event for item in candidates if item.accepted]
+        self.telegram.snapshot()
+        accepted = [
+            self.telegram.apply_override(item.event) for item in candidates if item.accepted
+        ]
         self._base_debug = {
             "checked_entities": ", ".join(entities),
             "calendar_errors": failures,
@@ -245,9 +254,13 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             )
         return self._view()
 
-    async def _async_build_plan(self, event, profile):
+    async def _async_build_plan(self, event, profile, destination_override=None):
         async with self._calculation_sem:
-            destination, source = await self._async_resolve_destination(event)
+            destination, source = (
+                (destination_override, "telegram_reply")
+                if destination_override is not None
+                else await self._async_resolve_destination(event)
+            )
             plan = Plan(event, profile, destination, source)
             if destination and not is_virtual(event):
                 target = event.start - timedelta(
@@ -299,6 +312,9 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         cfg = self.config
         if is_virtual(event):
             return "", "virtual"
+        override = self.telegram.overrides.get(event.key)
+        if override:
+            return override["location"], "telegram_reply"
         alias = resolve_alias(event, cfg.get(c.CONF_PLACE_ALIASES, {}))
         if alias:
             return alias, "saved_alias"
@@ -375,6 +391,8 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def _schedule_from_current_data(self):
         if not self._started or self._stopped:
             return
+        if self.telegram._bot_id is not None and not self.telegram._lock.locked():
+            self._create_task(self.telegram.async_prompt_missing())
         for unsub in self._timer_unsubs.values():
             unsub()
         self._timer_unsubs.clear()
@@ -682,6 +700,7 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "done": dict(self._done),
                 "snoozed": dict(self._snoozed),
                 "legacy_notified": self._legacy_notified[-50:],
+                "telegram": self.telegram.snapshot(),
             }
         )
 
@@ -723,6 +742,11 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "last_action_time": self._last_action_time,
                 "last_notify_result": self._last_notify_result,
                 "forecast_error": self._forecast_error,
+                "telegram_error": self.telegram.error,
+                "pending_location_requests": sum(
+                    record.get("state") in ("address", "confirm")
+                    for record in self.telegram.pending.values()
+                ),
                 "upcoming_events": [plan.as_data() for plan in plans],
                 "today_events": [
                     plan.as_data()

@@ -141,7 +141,15 @@
   "options": {
     "step": {
       "init": {
-        "title": "Choose settings"
+        "title": "Choose settings",
+        "menu_options": {
+          "general": "Schedule and travel settings",
+          "places": "Place aliases",
+          "profiles": "Family profiles",
+          "notifications": "Notifications and speech",
+          "weather": "Weather",
+          "telegram": "Telegram location conversation"
+        }
       },
       "general": {
         "title": "Schedule and travel",
@@ -534,6 +542,17 @@
           "weather_entity": "Choose a weather entity with hourly forecasts. Current weather is used when unavailable.",
           "calendar_entities": "Profile calendars are queried even if not in the main selection."
         }
+      },
+      "telegram": {
+        "title": "Ask for appointment locations on Telegram",
+        "description": "Choose the private-chat notifier and update event from the same bot. Reply with a location, then confirm to apply it. Calculation keeps the location even if calendar writing fails.",
+        "data": {
+          "telegram_location_enabled": "Enable location conversations",
+          "telegram_notify_entity": "Telegram private-chat notifier",
+          "telegram_event_entity": "Update event from the same bot",
+          "telegram_write_calendar": "Save confirmed locations to the calendar",
+          "telegram_request_hours": "Ask about appointments within (hours)"
+        }
       }
     },
     "error": {
@@ -541,7 +560,8 @@
       "whole_number": "Enter whole numbers for time settings.",
       "notify_service": "Enter a notify.mobile_app service name.",
       "invalid_url": "Enter an HTTP or HTTPS URL.",
-      "duplicate_alias": "This alias already exists."
+      "duplicate_alias": "This alias already exists.",
+      "telegram_target": "Select enabled private-chat notifier and update event entities from the same Telegram bot, and enter a whole number of hours."
     }
   },
   "selector": {

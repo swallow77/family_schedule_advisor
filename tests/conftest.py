@@ -232,6 +232,7 @@ module(
     async_track_state_change_event=lambda *args: lambda: None,
 )
 module("homeassistant.helpers.storage", Store=Store)
+module("homeassistant.helpers.entity_registry", async_get=lambda hass: hass.registry)
 module(
     "homeassistant.helpers.update_coordinator",
     DataUpdateCoordinator=Coordinator,
