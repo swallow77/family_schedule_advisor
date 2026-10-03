@@ -143,8 +143,20 @@ def test_failed_route_never_invents_departure_time():
     plan = Plan(event(), {}, "station", "location", TransitResult(0, "", status="ZERO_RESULTS"))
     plan.calculate_times(15, 10, 0)
     assert plan.departure_time is None and plan.status == "경로 확인 필요"
-    assert plan.notify_time == plan.event.start - timedelta(minutes=25)
+    assert plan.notify_time == plan.event.start - timedelta(minutes=60)
     assert "직접 확인" in fallback_message(plan)
+
+
+@pytest.mark.parametrize(
+    "destination,status",
+    [("", None), ("station", None), ("station", "ZERO_RESULTS"), ("station", "ERROR")],
+)
+def test_unresolved_reminder_is_exactly_one_hour_before_start(destination, status):
+    route = TransitResult(0, "", status=status) if status else None
+    plan = Plan(event(), {}, destination, "location", route)
+    plan.calculate_times(45, 20, 0)
+    assert plan.notify_time == plan.event.start - timedelta(hours=1)
+    assert plan.departure_time is None
 
 
 def test_manual_fallback_is_explicit_and_includes_margin():

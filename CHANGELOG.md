@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+- Send the normal appointment reminder exactly 60 minutes before start when a destination/route is unresolved and no manual departure estimate is configured.
+- Keep this reminder independent of unanswered or cancelled Telegram location conversations. Preparation and arrival margins do not shorten the default hour.
+- Preserve calculated reminders after location confirmation, completed notification receipts, restart catch-up, virtual events and explicitly configured manual travel estimates.
+
 ## 0.5.0
 
 - Restore visible names for every options menu item in Korean and English.

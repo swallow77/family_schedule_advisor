@@ -6,7 +6,7 @@ from homeassistant.const import Platform
 
 DOMAIN = "family_schedule_advisor"
 NAME = "Family Schedule Advisor"
-VERSION = "0.5.0"
+VERSION = "0.5.1"
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
 
@@ -46,6 +46,7 @@ DEFAULT_TTS_SERVICE = "tts.google_cloud_say"
 DEFAULT_TTS_SPEED = 0.9
 DEFAULT_TTS_PITCH = -1.5
 DEFAULT_PREPARE_MINUTES = 15
+DEFAULT_UNRESOLVED_REMINDER_MINUTES = 60
 DEFAULT_ARRIVAL_MARGIN_MINUTES = 10
 DEFAULT_LOOKAHEAD_HOURS = 48
 DEFAULT_MIN_EVENT_HOUR = 0
