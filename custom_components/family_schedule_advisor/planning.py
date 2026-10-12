@@ -212,7 +212,17 @@ def fallback_message(plan: Plan, stage: str = "prepare") -> str:
     if is_virtual(plan.event):
         return message + " 온라인 일정입니다. 접속과 준비를 확인해 주세요."
     if stage == "departure":
-        return message + f" {plan.destination}로 출발할 시간입니다."
+        destination = plan.destination or plan.event.location.strip() or "목적지 미확인"
+        message += f" 목적지는 {destination}입니다."
+        if plan.departure_time is not None:
+            message += f" 출발 예정 시각은 {data['departure_time_text']}입니다."
+        else:
+            message += " 출발 시각은 확인되지 않았습니다."
+        if data["transit_duration_text"] != "정보 없음":
+            message += f" 예상 이동시간은 {data['transit_duration_text']}입니다."
+        else:
+            message += " 예상 이동시간은 확인되지 않았습니다."
+        return message + " 지금 출발해 주세요."
     if plan.departure_time:
         message += f" {data['departure_time_text']}에 출발하도록 준비해 주세요."
         if plan.estimated:
