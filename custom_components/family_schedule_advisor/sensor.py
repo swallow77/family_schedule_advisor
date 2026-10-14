@@ -29,6 +29,12 @@ class AdvisorSensorDescription(SensorEntityDescription):
 
 SENSORS: tuple[AdvisorSensorDescription, ...] = (
     AdvisorSensorDescription(
+        key="preparation_calculation",
+        translation_key="preparation_calculation",
+        value_key="preparation_calculation",
+        icon="mdi:calculator",
+    ),
+    AdvisorSensorDescription(
         key="status",
         translation_key="status",
         value_key="status",
@@ -188,6 +194,24 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return attributes for key sensors."""
         data = self.coordinator.data or {}
+        preparation = {
+            key: data.get(key)
+            for key in (
+                "prepare_minutes",
+                "arrival_margin_minutes",
+                "reminder_basis",
+                "preparation_calculation",
+                "event_time",
+                "departure_time",
+                "notify_time",
+            )
+        }
+        if self.entity_description.key in {
+            "notify_time",
+            "notify_timestamp",
+            "preparation_calculation",
+        }:
+            return {**preparation, "full_text": data.get("preparation_calculation", "")}
         if self.entity_description.key in {"today_schedule", "schedule_conflicts"}:
             return {
                 "events"
@@ -208,6 +232,7 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
             }
         if self.entity_description.key == "recognized_event":
             return {
+                **preparation,
                 "event_title": data.get("event_title"),
                 "event_source": data.get("event_source"),
                 "event_location": data.get("event_location"),
@@ -246,6 +271,7 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
         if self.entity_description.key != "status":
             return None
         return {
+            **preparation,
             "event_key": data.get("event_key"),
             "recognized_event": data.get("recognized_event_text"),
             "raw_event_state": data.get("raw_event_state"),

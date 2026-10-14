@@ -55,6 +55,9 @@ class Plan:
     route_error: str = ""
     estimated: bool = False
     weather: dict[str, str] = field(default_factory=dict)
+    prepare_minutes: int = 0
+    arrival_margin_minutes: int = 0
+    reminder_basis: str = "unresolved_60"
 
     @property
     def key(self) -> str:
@@ -65,11 +68,14 @@ class Plan:
         return str(self.profile.get("name") or "가족")
 
     def calculate_times(self, prepare: int, margin: int, fallback: int) -> None:
+        self.prepare_minutes = prepare
+        self.arrival_margin_minutes = margin
         target = self.event.start - timedelta(minutes=margin)
         if is_virtual(self.event):
             self.status = "온라인 일정"
             self.route_status = "VIRTUAL"
             self.notify_time = self.event.start - timedelta(minutes=prepare)
+            self.reminder_basis = "virtual_preparation"
             return
         if self.route is not None:
             self.route_status = self.route.status
@@ -79,12 +85,15 @@ class Plan:
                 seconds=self.route.duration_seconds
             )
             self.status = "준비 완료"
+            self.reminder_basis = "route_departure"
         elif fallback > 0:
             self.departure_time = target - timedelta(minutes=fallback)
             self.status = "수동 이동시간 사용"
             self.estimated = True
+            self.reminder_basis = "manual_travel"
         else:
             self.status = "경로 확인 필요" if self.destination else "장소 확인 필요"
+            self.reminder_basis = "unresolved_60"
         # A location conversation never delays the appointment reminder. When
         # departure is unknown, the deadline is exactly one hour before start;
         # preparation and arrival margins are not subtracted a second time.
@@ -127,6 +136,16 @@ class Plan:
                 else "정보 없음"
             )
         )
+        if self.reminder_basis == "virtual_preparation":
+            calculation = f"온라인 일정: 약속 {display(self.event.start)} − 준비 {self.prepare_minutes}분 → 준비 알림 {display(self.notify_time)}"
+        elif self.reminder_basis == "unresolved_60":
+            calculation = f"이동정보 미확인: 약속 {display(self.event.start)} − 기본 {DEFAULT_UNRESOLVED_REMINDER_MINUTES}분 → 준비 알림 {display(self.notify_time)}"
+        elif (
+            self.route is not None and self.route.departure_time is not None and not self.estimated
+        ):
+            calculation = f"도착 여유 {self.arrival_margin_minutes}분을 반영한 경로 출발 {display(self.departure_time)} − 준비 {self.prepare_minutes}분 → 준비 알림 {display(self.notify_time)}"
+        else:
+            calculation = f"약속 {display(self.event.start)} − 이동 {duration} − 도착 여유 {self.arrival_margin_minutes}분 − 준비 {self.prepare_minutes}분 → 준비 알림 {display(self.notify_time)}"
         return {
             "status": self.status,
             "event_key": self.key,
@@ -147,6 +166,10 @@ class Plan:
             "departure_time_text": display(self.departure_time),
             "notify_time": self.notify_time.isoformat() if self.notify_time else None,
             "notify_time_text": display(self.notify_time),
+            "prepare_minutes": self.prepare_minutes,
+            "arrival_margin_minutes": self.arrival_margin_minutes,
+            "reminder_basis": self.reminder_basis,
+            "preparation_calculation": calculation,
             "transit_duration_seconds": route.duration_seconds if route else 0,
             "transit_duration_text": duration,
             "route_status": self.route_status,
@@ -224,10 +247,16 @@ def fallback_message(plan: Plan, stage: str = "prepare") -> str:
             message += " 예상 이동시간은 확인되지 않았습니다."
         return message + " 지금 출발해 주세요."
     if plan.departure_time:
+        if plan.destination:
+            message += f" 목적지는 {plan.destination}입니다."
+        if data["transit_duration_text"] != "정보 없음":
+            message += f" 예상 이동시간은 {data['transit_duration_text']}입니다."
+        message += f" 설정한 준비시간은 {plan.prepare_minutes}분입니다."
         message += f" {data['departure_time_text']}에 출발하도록 준비해 주세요."
         if plan.estimated:
             message += " 이동시간은 직접 설정한 예상값입니다."
     else:
+        message += " 이동정보가 확인되지 않아 기본 준비 알림을 드립니다."
         message += " 이동 경로나 장소를 확인하지 못했으니 출발 시간을 직접 확인해 주세요."
     weather = plan.weather
 

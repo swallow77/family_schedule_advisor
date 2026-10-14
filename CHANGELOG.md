@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.2
+
+- Explain preparation timing in setup, general options and family profile options with a concrete appointment/travel/margin/preparation example.
+- Expose effective preparation and arrival margins, reminder basis, and a readable preparation calculation in a new sensor and existing preparation/status sensor attributes.
+- Include destination, travel duration, configured preparation time and departure time in preparation messages. Preserve the user's richer departure announcement from commit 1fd436a.
+- Verify option changes reschedule preparation timers, family-specific preparation takes precedence, and actual transit departure times are respected.
+- Keep the 60-minute default for unresolved travel and unanswered Telegram requests.
+
 ## 0.5.1
 
 - Send the normal appointment reminder exactly 60 minutes before start when a destination/route is unresolved and no manual departure estimate is configured.

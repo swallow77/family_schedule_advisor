@@ -27,6 +27,7 @@ from custom_components.family_schedule_advisor.calendar_parser import (  # noqa:
     EventCandidate,
     EventInfo,
 )
+from custom_components.family_schedule_advisor.google_directions import TransitResult  # noqa: E402
 
 
 def check_boxes(schema):
@@ -62,7 +63,7 @@ async def runtime_check():
                 "ollama_url": "",
                 "enable_outfit_ai": False,
             },
-            options={},
+            options={"prepare_minutes": 20, "arrival_margin_minutes": 10},
             source="user",
             unique_id="smoke",
             discovery_keys=MappingProxyType({}),
@@ -88,6 +89,25 @@ async def runtime_check():
         ):
             data = await instance._async_calculate()
         assert data["route_status"] == "VIRTUAL" and data["departure_time"] is None
+        assert data["reminder_basis"] == "virtual_preparation"
+        event.title = "Appointment"
+        event.location = "Station"
+        with (
+            patch.object(
+                coordinator,
+                "async_get_event_candidates",
+                AsyncMock(return_value=[EventCandidate(event, True)]),
+            ),
+            patch.object(
+                coordinator,
+                "async_get_transit_duration",
+                AsyncMock(return_value=TransitResult(1800, "30 min")),
+            ),
+        ):
+            data = await instance._async_calculate()
+        assert dt_util.parse_datetime(data["notify_time"]) == event.start - timedelta(minutes=60)
+        assert data["prepare_minutes"] == 20 and data["reminder_basis"] == "route_departure"
+        assert data["preparation_calculation"]
         instance.async_set_updated_data(data)
         await instance.async_shutdown()
         await instance.session.close()

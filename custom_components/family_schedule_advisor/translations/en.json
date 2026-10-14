@@ -11,7 +11,7 @@
           "google_api_key": "Google Directions API key",
           "ollama_url": "Ollama URL",
           "ollama_model": "Ollama model",
-          "prepare_minutes": "Preparation time (minutes)",
+          "prepare_minutes": "Preparation time before departure (minutes)",
           "arrival_margin_minutes": "Arrival margin (minutes)",
           "lookahead_hours": "Lookahead (hours)",
           "min_event_hour": "Earliest event hour",
@@ -49,6 +49,11 @@
           "profile": "Family member to edit",
           "name": "Family member name",
           "person_entity": "Presence entity (mute speech while away)"
+        },
+        "data_description": {
+          "prepare_minutes": "Preparation reminders occur this many minutes before departure. Example: appointment 15:00, travel 30 min, arrival margin 10 min, preparation 20 min gives a reminder at 14:00. Unknown travel keeps the 60-minute default reminder.",
+          "arrival_margin_minutes": "Plan arrival this many minutes before the appointment. This is separate from preparation time.",
+          "fallback_travel_minutes": "Use this manual travel estimate only if route lookup fails. Zero leaves departure unknown and sends the default reminder 60 minutes before the appointment."
         }
       }
     },
@@ -115,6 +120,9 @@
       },
       "route_summary": {
         "name": "Route instructions"
+      },
+      "preparation_calculation": {
+        "name": "Preparation calculation"
       }
     },
     "button": {
@@ -159,7 +167,7 @@
           "google_api_key": "Google Directions API key",
           "ollama_url": "Ollama URL",
           "ollama_model": "Ollama model",
-          "prepare_minutes": "Preparation time (minutes)",
+          "prepare_minutes": "Preparation time before departure (minutes)",
           "arrival_margin_minutes": "Arrival margin (minutes)",
           "lookahead_hours": "Lookahead (hours)",
           "min_event_hour": "Earliest event hour",
@@ -199,12 +207,14 @@
           "person_entity": "Presence entity (mute speech while away)"
         },
         "data_description": {
-          "fallback_travel_minutes": "Used only when route lookup fails. Zero leaves departure time unknown.",
+          "fallback_travel_minutes": "Use this manual travel estimate only if route lookup fails. Zero leaves departure unknown and sends the default reminder 60 minutes before the appointment.",
           "mobile_notify_service": "Example: notify.mobile_app_my_phone. Enables actionable notifications.",
           "quiet_enabled": "Text notifications remain enabled. Equal start/end hours mute speech all day.",
           "person_entity": "If set, speech is enabled only while this person is home. Mobile alerts remain enabled.",
           "weather_entity": "Choose a weather entity with hourly forecasts. Current weather is used when unavailable.",
-          "calendar_entities": "Profile calendars are queried even if not in the main selection."
+          "calendar_entities": "Profile calendars are queried even if not in the main selection.",
+          "prepare_minutes": "Preparation reminders occur this many minutes before departure. Example: appointment 15:00, travel 30 min, arrival margin 10 min, preparation 20 min gives a reminder at 14:00. Unknown travel keeps the 60-minute default reminder.",
+          "arrival_margin_minutes": "Plan arrival this many minutes before the appointment. This is separate from preparation time."
         }
       },
       "places": {
@@ -383,7 +393,7 @@
           "google_api_key": "Google Directions API key",
           "ollama_url": "Ollama URL",
           "ollama_model": "Ollama model",
-          "prepare_minutes": "Preparation time (minutes)",
+          "prepare_minutes": "Preparation time before departure (minutes)",
           "arrival_margin_minutes": "Arrival margin (minutes)",
           "lookahead_hours": "Lookahead (hours)",
           "min_event_hour": "Earliest event hour",
@@ -423,13 +433,16 @@
           "person_entity": "Presence entity (mute speech while away)"
         },
         "data_description": {
-          "fallback_travel_minutes": "Used only when route lookup fails. Zero leaves departure time unknown.",
+          "fallback_travel_minutes": "Use this manual travel estimate only if route lookup fails. Zero leaves departure unknown and sends the default reminder 60 minutes before the appointment.",
           "mobile_notify_service": "Example: notify.mobile_app_my_phone. Enables actionable notifications.",
           "quiet_enabled": "Text notifications remain enabled. Equal start/end hours mute speech all day.",
           "person_entity": "If set, speech is enabled only while this person is home. Mobile alerts remain enabled.",
           "weather_entity": "Choose a weather entity with hourly forecasts. Current weather is used when unavailable.",
-          "calendar_entities": "Profile calendars are queried even if not in the main selection."
-        }
+          "calendar_entities": "Profile calendars are queried even if not in the main selection.",
+          "prepare_minutes": "Preparation reminders occur this many minutes before departure. Example: appointment 15:00, travel 30 min, arrival margin 10 min, preparation 20 min gives a reminder at 14:00. Unknown travel keeps the 60-minute default reminder.",
+          "arrival_margin_minutes": "Plan arrival this many minutes before the appointment. This is separate from preparation time."
+        },
+        "description": "Family preparation and arrival margins override general settings. Known routes use the appointment, travel, arrival margin, and preparation time. Unknown travel keeps the 60-minute default reminder."
       },
       "notifications": {
         "title": "Notifications and speech",
