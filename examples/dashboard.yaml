@@ -5,6 +5,7 @@ cards:
     title: 가족 일정 출발 도우미
     entities:
       - sensor.family_schedule_advisor_status
+      - sensor.family_schedule_advisor_preparation_calculation
       - sensor.family_schedule_advisor_today_schedule
       - sensor.family_schedule_advisor_schedule_conflicts
       - sensor.family_schedule_advisor_next_event

@@ -6,7 +6,7 @@ from homeassistant.const import Platform
 
 DOMAIN = "family_schedule_advisor"
 NAME = "Family Schedule Advisor"
-VERSION = "0.5.1"
+VERSION = "0.5.2"
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
 
