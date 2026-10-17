@@ -152,11 +152,19 @@
         "title": "Choose settings",
         "menu_options": {
           "general": "Schedule and travel settings",
+          "ai": "AI model selection",
           "places": "Place aliases",
           "profiles": "Family profiles",
           "notifications": "Notifications and speech",
           "weather": "Weather",
           "telegram": "Telegram location conversation"
+        }
+      },
+      "ai": {
+        "title": "Select AI model",
+        "description": "Choose an installed model from {server_url}. This model handles destination extraction and outfit advice. The list refreshes when this screen opens. If the server cannot be reached, only the current model is shown. Change the server address in general settings. Saving applies the model automatically.",
+        "data": {
+          "ollama_model": "AI model"
         }
       },
       "general": {

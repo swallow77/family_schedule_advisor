@@ -145,6 +145,7 @@ def test_manifest_and_translations_are_consistent():
         menus = data["options"]["step"]["init"]["menu_options"]
         assert set(menus) == {
             "general",
+            "ai",
             "places",
             "profiles",
             "notifications",

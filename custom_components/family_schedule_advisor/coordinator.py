@@ -34,7 +34,7 @@ from .ollama_client import (
     async_extract_destination,
     async_generate_text,
     build_outfit_prompt,
-    sanitize_tts,
+    sanitize_outfit_tts,
 )
 from .planning import (
     Plan,
@@ -450,10 +450,14 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     build_outfit_prompt(plan.as_data(), plan.weather),
                     timeout=20,
                 )
-                text = sanitize_tts(text)
+                text = sanitize_outfit_tts(text)
                 current = self._plans.get(plan.key)
-                if current is not None and self._signature(current) == signature and len(text) > 10:
-                    self._messages[plan.key] = (signature, text[:800])
+                if (
+                    current is not None
+                    and self._signature(current) == signature
+                    and len(text) >= 80
+                ):
+                    self._messages[plan.key] = (signature, text[:1200])
         except Exception:
             _LOGGER.exception("Outfit pre-generation failed; using the deterministic message")
         finally:
@@ -480,7 +484,15 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._mark_action("테스트 알림 실행 중" if test else "자동 알림 실행 중")
             # Automatic notifications never wait for an LLM at their due time.
             plan.weather = self._weather_for_plan(plan)
-            message = fallback_message(plan, stage)
+            cached = self._messages.get(key)
+            advice = (
+                sanitize_outfit_tts(cached[1])
+                if stage == "prepare" and cached and cached[0] == self._signature(plan)
+                else ""
+            )
+            message = fallback_message(plan, stage, include_advice=len(advice) < 80)
+            if len(advice) >= 80:
+                message += " " + advice
             if (
                 not test
                 and stage == "prepare"
@@ -488,9 +500,6 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 and dt_util.now() - plan.notify_time > timedelta(minutes=1)
             ):
                 message = "준비 알림 시각이 지나 지금 안내합니다. " + message
-            cached = self._messages.get(key)
-            if stage == "prepare" and cached and cached[0] == self._signature(plan):
-                message += " " + cached[1]
             channels = self._channels(plan)
             failures = []
             successes = []
