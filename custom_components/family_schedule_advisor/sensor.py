@@ -229,6 +229,7 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
             return {
                 "full_text": data.get(self.entity_description.value_key, ""),
                 "event_key": data.get("event_key"),
+                "notification_channel_results": data.get("notification_channel_results", {}),
             }
         if self.entity_description.key == "recognized_event":
             return {
@@ -290,6 +291,7 @@ class AdvisorSensor(CoordinatorEntity[FamilyScheduleAdvisorCoordinator], SensorE
             "start_address": data.get("start_address"),
             "end_address": data.get("end_address"),
             "last_notify_result": data.get("last_notify_result"),
+            "notification_channel_results": data.get("notification_channel_results", {}),
             "checked_entities": data.get("checked_entities"),
             "candidate_count": data.get("candidate_count"),
             "accepted_candidate_count": data.get("accepted_candidate_count"),

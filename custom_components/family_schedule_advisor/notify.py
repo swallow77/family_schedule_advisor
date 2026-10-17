@@ -5,8 +5,52 @@ from __future__ import annotations
 import logging
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def telegram_reminder_text(message: str, details: dict, stage: str, test: bool = False) -> str:
+    """Use the exact notified plan, including its own route, not a selected sensor."""
+    title = "가족 일정 출발 안내" if stage == "departure" else "가족 일정 준비 안내"
+    if test:
+        title = "[테스트] " + title
+    text = "\n".join(
+        [
+            title,
+            message[:1900],
+            "",
+            f"일정: {str(details.get('event_title') or '')[:250]}",
+            f"약속: {details.get('event_time_text') or '정보 없음'}",
+            f"목적지: {str(details.get('destination') or '정보 없음')[:300]}",
+            f"이동시간: {details.get('transit_duration_text') or '정보 없음'}",
+            f"출발: {details.get('departure_time_text') or '정보 없음'}",
+            f"준비 알림: {details.get('notify_time_text') or '정보 없음'}",
+            "",
+            "이동 경로:",
+            str(details.get("route_summary") or "상세 경로 정보 없음")[:1100],
+            str(details.get("route_link") or "")[:400],
+        ]
+    )
+    # Telegram's limit counts UTF-16 units, including emoji surrogate pairs.
+    return text.encode("utf-16-le")[:8000].decode("utf-16-le", errors="ignore")
+
+
+async def async_send_telegram_notify(hass: HomeAssistant, entity_id: str, message: str) -> None:
+    """Only record success after Telegram returns a sent message ID."""
+    result = await hass.services.async_call(
+        "telegram_bot",
+        "send_message",
+        {"entity_id": [entity_id], "message": message, "parse_mode": "plain_text"},
+        blocking=True,
+        return_response=True,
+    )
+    chats = (result or {}).get("chats", [])
+    if not any(
+        chat.get("message_id") is not None and chat.get("entity_id", entity_id) == entity_id
+        for chat in chats
+    ):
+        raise HomeAssistantError("Telegram did not acknowledge the reminder")
 
 
 def _parse_script(script_entity: str) -> tuple[str, str]:
@@ -31,6 +75,10 @@ async def async_send_universal_notify(
 ) -> None:
     """Call the configured notify script with the configured TTS options."""
     domain, service = _parse_script(notify_script)
+    if domain == "script" and service == "family_schedule_advisor_noop_notify":
+        raise HomeAssistantError(
+            "알림을 보내지 않는 빈 스크립트입니다. 실제 알림 스크립트를 선택하세요."
+        )
     options: dict[str, float] = {}
     if speed:
         options["speed"] = float(speed)

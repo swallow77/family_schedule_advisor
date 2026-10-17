@@ -497,7 +497,8 @@
           "delete": "Delete this item",
           "profile": "Family member to edit",
           "name": "Family member name",
-          "person_entity": "Presence entity (mute speech while away)"
+          "person_entity": "Presence entity (mute speech while away)",
+          "telegram_reminder_entity": "Telegram chat for preparation and departure reminders"
         },
         "data_description": {
           "fallback_travel_minutes": "Used only when route lookup fails. Zero leaves departure time unknown.",
@@ -505,7 +506,9 @@
           "quiet_enabled": "Text notifications remain enabled. Equal start/end hours mute speech all day.",
           "person_entity": "If set, speech is enabled only while this person is home. Mobile alerts remain enabled.",
           "weather_entity": "Choose a weather entity with hourly forecasts. Current weather is used when unavailable.",
-          "calendar_entities": "Profile calendars are queried even if not in the main selection."
+          "calendar_entities": "Profile calendars are queried even if not in the main selection.",
+          "telegram_reminder_entity": "Send each appointment’s preparation/departure reminder and its route to this chat. This can differ from the location conversation bot.",
+          "notify_script": "A script that actually handles speech, such as script.universal_notify. Leave empty for no speech; the known no-op notification script is not allowed."
         }
       },
       "weather": {
@@ -582,7 +585,8 @@
       "notify_service": "Enter a notify.mobile_app service name.",
       "invalid_url": "Enter an HTTP or HTTPS URL.",
       "duplicate_alias": "This alias already exists.",
-      "telegram_target": "Select enabled private-chat notifier and update event entities from the same Telegram bot, and enter a whole number of hours."
+      "telegram_target": "Select enabled private-chat notifier and update event entities from the same Telegram bot, and enter a whole number of hours.",
+      "noop_script": "This no-op script does not send notifications. Choose a real notification script or leave empty for no speech."
     }
   },
   "selector": {

@@ -95,6 +95,8 @@ def _validate(values: dict) -> dict[str, str]:
     url = values.get(c.CONF_OLLAMA_URL, "")
     if url and not url.startswith(("http://", "https://")):
         errors[c.CONF_OLLAMA_URL] = "invalid_url"
+    if values.get(c.CONF_NOTIFY_SCRIPT) == "script.family_schedule_advisor_noop_notify":
+        errors[c.CONF_NOTIFY_SCRIPT] = "noop_script"
     return errors
 
 
@@ -196,6 +198,11 @@ def _notification_schema(defaults: dict) -> vol.Schema:
                 c.CONF_MOBILE_NOTIFY_SERVICE,
                 default=defaults.get(c.CONF_MOBILE_NOTIFY_SERVICE, ""),
             ): str,
+            _optional_entity(c.CONF_TELEGRAM_REMINDER_ENTITY, defaults): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    filter={"domain": "notify", "integration": "telegram_bot"}
+                )
+            ),
             vol.Optional(
                 c.CONF_TTS_TARGET,
                 default=defaults.get(c.CONF_TTS_TARGET, c.DEFAULT_TTS_TARGET),
@@ -367,6 +374,13 @@ class FamilyScheduleAdvisorOptionsFlow(config_entries.OptionsFlow):
         return await self._form("general", _schema(defaults, models), user_input)
 
     async def async_step_notifications(self, user_input=None):
+        if user_input is not None:
+            user_input = {
+                **user_input,
+                c.CONF_TELEGRAM_REMINDER_ENTITY: user_input.get(
+                    c.CONF_TELEGRAM_REMINDER_ENTITY, ""
+                ),
+            }
         return await self._form(
             "notifications",
             _notification_schema({**self.defaults, **(user_input or {})}),
