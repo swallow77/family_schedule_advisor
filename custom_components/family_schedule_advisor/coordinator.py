@@ -29,12 +29,17 @@ from .calendar_parser import (
 )
 from .google_directions import async_get_transit_duration
 from .google_routes import async_get_route
-from .notify import async_send_mobile_notify, async_send_universal_notify
+from .notify import (
+    async_send_mobile_notify,
+    async_send_telegram_notify,
+    async_send_universal_notify,
+    telegram_reminder_text,
+)
 from .ollama_client import (
     async_extract_destination,
     async_generate_text,
     build_outfit_prompt,
-    sanitize_tts,
+    sanitize_outfit_tts,
 )
 from .planning import (
     Plan,
@@ -87,6 +92,7 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._last_action = ""
         self._last_action_time = ""
         self._last_notify_result = ""
+        self._last_channel_results = {}
         self._started = False
         self._stopped = False
         self._state_save_lock = asyncio.Lock()
@@ -114,6 +120,8 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._done = dict(stored.get("done", {}))
             self._snoozed = dict(stored.get("snoozed", {}))
             self._legacy_notified = list(stored.get("legacy_notified", []))
+            if stored.get("receipt_version", 1) < 2:
+                self._migrate_completed_stages()
             self.telegram.restore(stored.get("telegram", {}))
             if self.telegram.overrides:
                 await self.async_request_refresh()
@@ -130,6 +138,7 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.hass.bus.async_listen("mobile_app_notification_action", self._mobile_action)
         )
         self._unsubs.extend(self.telegram.start())
+        await self._save_state()
         self._started = True
         self._publish()
 
@@ -340,6 +349,9 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     def _channels(self, plan):
         channels = {}
+        telegram = str(plan.profile.get(c.CONF_TELEGRAM_REMINDER_ENTITY, "")).strip()
+        if telegram:
+            channels["telegram"] = telegram
         script = str(plan.profile.get(c.CONF_NOTIFY_SCRIPT, c.DEFAULT_NOTIFY_SCRIPT)).strip()
         mobile = str(plan.profile.get(c.CONF_MOBILE_NOTIFY_SERVICE, "")).strip()
         if script:
@@ -347,6 +359,26 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if mobile:
             channels["mobile"] = mobile
         return channels
+
+    def _migrate_completed_stages(self):
+        """Adding Telegram must not replay stages completed by the old channels."""
+        grouped = {}
+        for receipt, timestamp in self._sent.items():
+            token, channel = receipt.rsplit(":", 1)
+            grouped.setdefault(token, {})[channel] = timestamp
+        for token, receipts in grouped.items():
+            profile_id = token.split(":", 1)[0]
+            profile = {
+                **self.config,
+                **self.config.get(c.CONF_FAMILY_PROFILES, {}).get(profile_id, {}),
+            }
+            old_channels = []
+            if str(profile.get(c.CONF_NOTIFY_SCRIPT, c.DEFAULT_NOTIFY_SCRIPT)).strip():
+                old_channels.append("script")
+            if str(profile.get(c.CONF_MOBILE_NOTIFY_SERVICE, "")).strip():
+                old_channels.append("mobile")
+            if old_channels and all(channel in receipts for channel in old_channels):
+                self._done.setdefault(token, max(receipts[channel] for channel in old_channels))
 
     def _stage_done(self, plan, stage):
         if f"{plan.key}:all" in self._done or f"{plan.key}:{stage}" in self._done:
@@ -450,10 +482,14 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     build_outfit_prompt(plan.as_data(), plan.weather),
                     timeout=20,
                 )
-                text = sanitize_tts(text)
+                text = sanitize_outfit_tts(text)
                 current = self._plans.get(plan.key)
-                if current is not None and self._signature(current) == signature and len(text) > 10:
-                    self._messages[plan.key] = (signature, text[:800])
+                if (
+                    current is not None
+                    and self._signature(current) == signature
+                    and len(text) >= 80
+                ):
+                    self._messages[plan.key] = (signature, text[:1200])
         except Exception:
             _LOGGER.exception("Outfit pre-generation failed; using the deterministic message")
         finally:
@@ -480,7 +516,15 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._mark_action("테스트 알림 실행 중" if test else "자동 알림 실행 중")
             # Automatic notifications never wait for an LLM at their due time.
             plan.weather = self._weather_for_plan(plan)
-            message = fallback_message(plan, stage)
+            cached = self._messages.get(key)
+            advice = (
+                sanitize_outfit_tts(cached[1])
+                if stage == "prepare" and cached and cached[0] == self._signature(plan)
+                else ""
+            )
+            message = fallback_message(plan, stage, include_advice=len(advice) < 80)
+            if len(advice) >= 80:
+                message += " " + advice
             if (
                 not test
                 and stage == "prepare"
@@ -488,17 +532,16 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 and dt_util.now() - plan.notify_time > timedelta(minutes=1)
             ):
                 message = "준비 알림 시각이 지나 지금 안내합니다. " + message
-            cached = self._messages.get(key)
-            if stage == "prepare" and cached and cached[0] == self._signature(plan):
-                message += " " + cached[1]
             channels = self._channels(plan)
             failures = []
             successes = []
+            channel_results = {}
             if not channels:
                 failures.append("알림 스크립트 또는 휴대폰 알림 서비스를 설정하세요")
             for channel, service in channels.items():
                 receipt = f"{token}:{channel}"
                 if not test and receipt in self._sent:
+                    channel_results[channel] = {"status": "previously_completed", "target": service}
                     continue
                 # A refresh/action may have removed or completed this event while
                 # another channel was running. Never dispatch stale follow-up work.
@@ -507,7 +550,16 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 ):
                     break
                 try:
-                    if channel == "script":
+                    if channel == "telegram":
+                        await asyncio.wait_for(
+                            async_send_telegram_notify(
+                                self.hass,
+                                service,
+                                telegram_reminder_text(message, plan.as_data(), stage, test),
+                            ),
+                            timeout=20,
+                        )
+                    elif channel == "script":
                         quiet = is_quiet(
                             dt_util.now(),
                             bool(plan.profile.get(c.CONF_QUIET_ENABLED, False)),
@@ -538,7 +590,7 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                 ),
                                 tts_enabled=tts_enabled,
                             ),
-                            timeout=45,
+                            timeout=c.NOTIFY_SCRIPT_TIMEOUT_SECONDS,
                         )
                     else:
                         await asyncio.wait_for(
@@ -553,10 +605,21 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             timeout=15,
                         )
                     successes.append(channel)
+                    channel_results[channel] = {
+                        "status": "telegram_accepted"
+                        if channel == "telegram"
+                        else "service_completed",
+                        "target": service,
+                    }
                     if not test:
                         self._sent[receipt] = dt_util.now().isoformat()
                         await self._save_state()
                 except Exception as err:  # noqa: BLE001 - user scripts can raise arbitrary service errors
+                    channel_results[channel] = {
+                        "status": "failed",
+                        "target": service,
+                        "error": type(err).__name__,
+                    }
                     failures.append(f"{channel}: {type(err).__name__}")
                     _LOGGER.warning(
                         "Family reminder channel %s failed (%s)",
@@ -571,17 +634,27 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._retry_at.pop(token, None)
                 if not test:
                     self._snoozed.pop(token, None)
+                    if channels and all(f"{token}:{channel}" in self._sent for channel in channels):
+                        self._done[token] = dt_util.now().isoformat()
                     await self._save_state()
             result = (
                 "알림 실행 실패: " + ", ".join(failures)
                 if failures
                 else ("테스트 알림 실행 완료" if test else "알림 서비스 실행 완료")
             )
+            if successes:
+                labels = {
+                    "telegram": "텔레그램 전송 확인",
+                    "script": "알림 스크립트 실행 완료",
+                    "mobile": "휴대폰 알림 요청 완료",
+                }
+                result += " · " + ", ".join(labels[channel] for channel in successes)
             if key in self._plans:
                 self._messages.setdefault(key, ("", ""))
                 self._last_message_event_key = key
                 self._last_message = message
             self._last_notify_result = result
+            self._last_channel_results = channel_results
             self._last_action = "테스트 알림 완료" if test else "자동 알림 완료"
         finally:
             self._inflight.discard(token)
@@ -697,6 +770,7 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self._store.async_save(
             {
                 "sent": dict(self._sent),
+                "receipt_version": 2,
                 "done": dict(self._done),
                 "snoozed": dict(self._snoozed),
                 "legacy_notified": self._legacy_notified[-50:],
@@ -741,6 +815,7 @@ class FamilyScheduleAdvisorCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "last_action": self._last_action,
                 "last_action_time": self._last_action_time,
                 "last_notify_result": self._last_notify_result,
+                "notification_channel_results": dict(self._last_channel_results),
                 "forecast_error": self._forecast_error,
                 "telegram_error": self.telegram.error,
                 "pending_location_requests": sum(

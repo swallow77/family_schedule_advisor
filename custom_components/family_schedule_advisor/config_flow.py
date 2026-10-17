@@ -9,9 +9,11 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.core import callback
 from homeassistant.helpers import selector
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from . import const as c
 from .calendar_parser import split_entities
+from .ollama_client import async_list_models
 
 WEATHER_KEYS = [
     c.CONF_WEATHER_RAIN,
@@ -93,10 +95,29 @@ def _validate(values: dict) -> dict[str, str]:
     url = values.get(c.CONF_OLLAMA_URL, "")
     if url and not url.startswith(("http://", "https://")):
         errors[c.CONF_OLLAMA_URL] = "invalid_url"
+    if values.get(c.CONF_NOTIFY_SCRIPT) == "script.family_schedule_advisor_noop_notify":
+        errors[c.CONF_NOTIFY_SCRIPT] = "noop_script"
     return errors
 
 
-def _schema(defaults: dict) -> vol.Schema:
+def _model_selector(defaults: dict, models: list[str] | None = None):
+    current = str(defaults.get(c.CONF_OLLAMA_MODEL) or c.DEFAULT_OLLAMA_MODEL).strip()
+    choices = list(dict.fromkeys([*(models or []), current]))
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(options=choices, mode="dropdown", custom_value=False)
+    )
+
+
+async def _model_names(hass, defaults: dict) -> list[str]:
+    if hass is None:
+        return []
+    return await async_list_models(
+        async_get_clientsession(hass),
+        str(defaults.get(c.CONF_OLLAMA_URL, c.DEFAULT_OLLAMA_URL)).strip(),
+    )
+
+
+def _schema(defaults: dict, models: list[str] | None = None) -> vol.Schema:
     return vol.Schema(
         {
             vol.Required(
@@ -160,8 +181,8 @@ def _schema(defaults: dict) -> vol.Schema:
             vol.Optional(c.CONF_OLLAMA_URL, default=defaults.get(c.CONF_OLLAMA_URL, "")): str,
             vol.Optional(
                 c.CONF_OLLAMA_MODEL,
-                default=defaults.get(c.CONF_OLLAMA_MODEL, c.DEFAULT_OLLAMA_MODEL),
-            ): str,
+                default=str(defaults.get(c.CONF_OLLAMA_MODEL) or c.DEFAULT_OLLAMA_MODEL).strip(),
+            ): _model_selector(defaults, models),
         }
     )
 
@@ -177,6 +198,11 @@ def _notification_schema(defaults: dict) -> vol.Schema:
                 c.CONF_MOBILE_NOTIFY_SERVICE,
                 default=defaults.get(c.CONF_MOBILE_NOTIFY_SERVICE, ""),
             ): str,
+            _optional_entity(c.CONF_TELEGRAM_REMINDER_ENTITY, defaults): selector.EntitySelector(
+                selector.EntitySelectorConfig(
+                    filter={"domain": "notify", "integration": "telegram_bot"}
+                )
+            ),
             vol.Optional(
                 c.CONF_TTS_TARGET,
                 default=defaults.get(c.CONF_TTS_TARGET, c.DEFAULT_TTS_TARGET),
@@ -229,8 +255,10 @@ class FamilyScheduleAdvisorConfigFlow(config_entries.ConfigFlow, domain=c.DOMAIN
                 await self.async_set_unique_id(c.DOMAIN)
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(title=c.NAME, data=user_input)
+        defaults = user_input or {}
+        models = await _model_names(getattr(self, "hass", None), defaults)
         return self.async_show_form(
-            step_id="user", data_schema=_schema(user_input or {}), errors=errors
+            step_id="user", data_schema=_schema(defaults, models), errors=errors
         )
 
     @staticmethod
@@ -250,7 +278,37 @@ class FamilyScheduleAdvisorOptionsFlow(config_entries.OptionsFlow):
     async def async_step_init(self, user_input=None):
         return self.async_show_menu(
             step_id="init",
-            menu_options=["general", "places", "profiles", "notifications", "weather", "telegram"],
+            menu_options=[
+                "general",
+                "ai",
+                "places",
+                "profiles",
+                "notifications",
+                "weather",
+                "telegram",
+            ],
+        )
+
+    async def async_step_ai(self, user_input=None):
+        if user_input is not None:
+            return self._save({c.CONF_OLLAMA_MODEL: str(user_input[c.CONF_OLLAMA_MODEL]).strip()})
+        defaults = self.defaults
+        models = await _model_names(self.hass, defaults)
+        return self.async_show_form(
+            step_id="ai",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        c.CONF_OLLAMA_MODEL,
+                        default=str(
+                            defaults.get(c.CONF_OLLAMA_MODEL) or c.DEFAULT_OLLAMA_MODEL
+                        ).strip(),
+                    ): _model_selector(defaults, models),
+                }
+            ),
+            description_placeholders={
+                "server_url": str(defaults.get(c.CONF_OLLAMA_URL, c.DEFAULT_OLLAMA_URL)),
+            },
         )
 
     async def async_step_telegram(self, user_input=None):
@@ -307,11 +365,22 @@ class FamilyScheduleAdvisorOptionsFlow(config_entries.OptionsFlow):
         return self.async_show_form(step_id=step, data_schema=schema, errors=errors)
 
     async def async_step_general(self, user_input=None):
-        return await self._form(
-            "general", _schema({**self.defaults, **(user_input or {})}), user_input
-        )
+        defaults = {**self.defaults, **(user_input or {})}
+        if user_input is not None:
+            result = await self._form("general", _schema(defaults), user_input)
+            if result["type"] == "create_entry":
+                return result
+        models = await _model_names(getattr(self, "hass", None), defaults)
+        return await self._form("general", _schema(defaults, models), user_input)
 
     async def async_step_notifications(self, user_input=None):
+        if user_input is not None:
+            user_input = {
+                **user_input,
+                c.CONF_TELEGRAM_REMINDER_ENTITY: user_input.get(
+                    c.CONF_TELEGRAM_REMINDER_ENTITY, ""
+                ),
+            }
         return await self._form(
             "notifications",
             _notification_schema({**self.defaults, **(user_input or {})}),

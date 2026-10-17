@@ -36,7 +36,7 @@ def test_known_route_uses_all_three_time_inputs(prepare, margin, travel):
     assert f"준비 {prepare}분" in data["preparation_calculation"]
     message = fallback_message(plan)
     assert "목적지는 서울역" in message and f"이동시간은 {travel}분" in message
-    assert f"준비시간은 {prepare}분" in message
+    assert "설정한 준비시간" not in message
 
 
 def test_transit_uses_actual_departure_and_explains_it():

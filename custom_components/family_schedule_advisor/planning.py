@@ -228,17 +228,134 @@ def forecast_window(forecasts: list[dict], start: datetime, end: datetime) -> li
     return result
 
 
-def fallback_message(plan: Plan, stage: str = "prepare") -> str:
+def spoken_time(value: datetime) -> str:
+    """Speak the day and local time without repeating the month."""
+    period = "오전" if value.hour < 12 else "오후"
+    minute = f" {value.minute}분" if value.minute else ""
+    return f"{value.day}일 {period} {value.hour % 12 or 12}시{minute}"
+
+
+def weather_advice(weather: dict[str, str]) -> str:
+    """Keep useful clothing guidance available even when AI is not ready."""
+
+    def numeric(key):
+        match = re.search(r"-?\d+(?:\.\d+)?", str(weather.get(key, "")))
+        return float(match[0]) if match else None
+
+    def first_number(*keys):
+        return next((value for key in keys if (value := numeric(key)) is not None), None)
+
+    advice = []
+    temp = first_number("forecast_temp", "apparent", "feels_like", "temp")
+    current = numeric("temp")
+    feels = first_number("apparent", "feels_like")
+    sky = str(weather.get("forecast_condition") or weather.get("sky") or "")
+    conditions = {
+        "sunny": "맑음",
+        "clear-night": "맑음",
+        "cloudy": "흐림",
+        "partlycloudy": "구름 많음",
+        "rainy": "비",
+        "pouring": "강한 비",
+        "lightning-rainy": "뇌우",
+        "snowy": "눈",
+        "snowy-rainy": "비 또는 눈",
+        "fog": "안개",
+        "windy": "바람이 강함",
+    }
+    if sky not in {"", "정보 없음", "unknown", "unavailable", "none"}:
+        advice.append(f"하늘 상태는 {conditions.get(sky, sky)}입니다.")
+    if current is not None:
+        text = f"현재 기온은 {current:g}도"
+        if feels is not None:
+            text += f", 체감온도는 {feels:g}도"
+        advice.append(text + "입니다.")
+    if numeric("forecast_temp") is not None:
+        advice.append(f"외출 시간대에는 약 {numeric('forecast_temp'):g}도로 예상됩니다.")
+    if temp is not None:
+        if temp < 5:
+            clothing = "추위에 대비해 긴소매 안에 보온 내의를 겹쳐 입고 두꺼운 외투와 긴바지를 입으세요. 목도리와 따뜻한 양말도 도움이 됩니다."
+        elif temp < 12:
+            clothing = "쌀쌀한 기온이므로 긴소매와 니트 위에 따뜻한 겉옷을 입고 긴바지와 발을 덮는 신발로 준비하세요."
+        elif temp < 20:
+            clothing = "서늘하게 느낄 수 있으니 긴소매에 가벼운 겉옷이나 가디건을 겹쳐 입고 긴바지를 입으세요. 실내에서는 겉옷을 벗어 조절하면 좋겠습니다."
+        elif temp < 26:
+            clothing = "얇은 긴소매나 반소매에 가벼운 긴바지를 입고, 냉방이 있는 실내에서 입을 얇은 가디건을 챙기세요."
+        else:
+            clothing = "더운 기온이므로 통풍이 잘되는 반소매와 가벼운 옷차림으로 준비하고, 오래 이동한다면 마실 물을 챙기세요."
+        advice.append(clothing)
+    else:
+        advice.append("기온 정보가 없어 옷 두께를 정하기 어렵습니다. 외출 전 날씨를 확인해 주세요.")
+    rain = first_number("forecast_rain", "rain")
+    if rain is not None:
+        label = "외출 시간대" if numeric("forecast_rain") is not None else "현재 제공된"
+        advice.append(f"{label} 강수확률은 {rain:g}퍼센트입니다.")
+    rainy = sky in {"rainy", "pouring", "lightning-rainy", "snowy-rainy"} or "비" in sky
+    snowy = sky in {"snowy", "snowy-rainy"} or "눈" in sky
+    if (rain is not None and rain >= 40) or rainy or snowy:
+        advice.append(
+            "우산을 챙기고 젖거나 미끄러운 길에 대비해 밑창이 잘 미끄러지지 않는 신발을 신으세요."
+        )
+    wind = numeric("wind")
+    if wind is not None:
+        wind_text = str(weather.get("wind", "")).lower()
+        if "km/h" in wind_text or "kmh" in wind_text:
+            wind /= 3.6
+        elif "mph" in wind_text:
+            wind *= 0.44704
+        if wind >= 5:
+            advice.append("바람이 강한 편이니 바람을 막아주는 겉옷으로 준비하세요.")
+    humidity = numeric("humidity")
+    if humidity is not None and humidity >= 75 and temp is not None and temp >= 24:
+        advice.append("습도가 높아 답답할 수 있으니 땀이 잘 마르는 소재가 좋겠습니다.")
+    dust = str(weather.get("dust", ""))
+    if "나쁨" in dust or "매우나쁨" in dust:
+        advice.append(f"초미세먼지 등급은 {dust}이므로 보건용 마스크를 챙기세요.")
+    uv = str(weather.get("uv", ""))
+    uv_number = numeric("uv")
+    if any(level in uv for level in ("보통", "높음", "위험")) or (
+        uv_number is not None and uv_number >= 3
+    ):
+        advice.append("자외선에 대비해 자외선 차단제를 바르고, 야외에 오래 있다면 모자도 챙기세요.")
+    return " ".join(advice)
+
+
+def destination_advice(plan: Plan) -> str:
+    """Suggest relevant items without inventing venue-specific requirements."""
+    text = f"{plan.event.title} {plan.event.location} {plan.destination}".casefold()
+    explicit = re.search(r"(?:준비물|지참물)\s*[:：]\s*([^\n]{1,160})", plan.event.description)
+    if explicit:
+        return f"일정에 적힌 준비물은 {explicit[1].strip()}입니다. 빠진 것이 없는지 확인해 주세요."
+    if any(word in text for word in ("병원", "의원", "진료", "치과", "검진")):
+        return "진료에 사용할 신분증과 예약 내역을 챙기고, 병원에서 따로 안내한 지참물이나 검사 전 주의사항도 확인해 주세요."
+    if any(word in text for word in ("등산", "산행", "트레킹")):
+        return "산행에는 접지력이 좋은 신발과 마실 물, 가벼운 간식을 챙기고 체온을 조절할 겉옷을 준비하세요."
+    if any(word in text for word in ("운동", "헬스", "수영", "체육", "러닝", "축구")):
+        return "활동에 맞는 운동복과 물, 땀을 닦을 수건을 챙기고 수영 일정이라면 수영용품도 확인하세요."
+    if any(word in text for word in ("학교", "수업", "학원", "도서관", "시험", "대학")):
+        return "일정에 사용할 교재나 자료와 필기구를 챙기고, 시험이라면 수험표와 신분증이 필요한지 확인하세요."
+    if any(word in text for word in ("회의", "미팅", "출장", "면접", "출근")):
+        return "업무나 만남에 필요한 자료와 필기구를 챙기고, 노트북을 가져간다면 충전기도 함께 준비하세요."
+    if any(word in text for word in ("공연", "콘서트", "영화", "전시", "뮤지컬")):
+        return "예매한 입장권이나 예약 화면을 미리 확인하고, 모바일 입장권을 쓴다면 휴대전화 배터리도 확인해 주세요."
+    if any(word in text for word in ("식당", "갈비", "식사", "외식", "카페", "음식점", "레스토랑")):
+        return "식사 장소의 예약 내역과 결제 수단을 확인해 주세요. 대중교통으로 이동한다면 교통카드도 챙기세요."
+    if plan.profile.get("travel_mode", "transit") == "transit":
+        return "이동에 사용할 교통카드와 휴대전화를 챙기고, 일정 설명에 별도로 적힌 지참물이 있는지 확인해 주세요."
+    return "휴대전화와 일정에 필요한 자료를 챙기고, 방문 전에 예약 내역이 있는지도 확인해 주세요."
+
+
+def fallback_message(plan: Plan, stage: str = "prepare", *, include_advice: bool = True) -> str:
     data = plan.as_data()
     person = "" if plan.person_name == "가족" else plan.person_name + "님, "
-    message = f"{person}{data['event_time_text']}에 {plan.event.title} 일정이 있습니다."
+    message = f"{person}{spoken_time(plan.event.start)}에 {plan.event.title} 일정이 있습니다."
     if is_virtual(plan.event):
         return message + " 온라인 일정입니다. 접속과 준비를 확인해 주세요."
     if stage == "departure":
         destination = plan.destination or plan.event.location.strip() or "목적지 미확인"
         message += f" 목적지는 {destination}입니다."
         if plan.departure_time is not None:
-            message += f" 출발 예정 시각은 {data['departure_time_text']}입니다."
+            message += f" 출발 예정 시각은 {spoken_time(plan.departure_time)}입니다."
         else:
             message += " 출발 시각은 확인되지 않았습니다."
         if data["transit_duration_text"] != "정보 없음":
@@ -251,40 +368,12 @@ def fallback_message(plan: Plan, stage: str = "prepare") -> str:
             message += f" 목적지는 {plan.destination}입니다."
         if data["transit_duration_text"] != "정보 없음":
             message += f" 예상 이동시간은 {data['transit_duration_text']}입니다."
-        message += f" 설정한 준비시간은 {plan.prepare_minutes}분입니다."
-        message += f" {data['departure_time_text']}에 출발하도록 준비해 주세요."
+        message += f" {spoken_time(plan.departure_time)}에 출발하도록 준비해 주세요."
         if plan.estimated:
             message += " 이동시간은 직접 설정한 예상값입니다."
     else:
         message += " 이동정보가 확인되지 않아 기본 준비 알림을 드립니다."
         message += " 이동 경로나 장소를 확인하지 못했으니 출발 시간을 직접 확인해 주세요."
-    weather = plan.weather
-
-    def numeric(key):
-        match = re.search(r"-?\d+(?:\.\d+)?", str(weather.get(key, "")))
-        return float(match[0]) if match else None
-
-    temp = numeric("forecast_temp")
-    if temp is None:
-        temp = numeric("feels_like")
-    if temp is None:
-        temp = numeric("temp")
-    rain = numeric("forecast_rain")
-    if rain is None:
-        rain = numeric("rain")
-    if temp is not None:
-        message += (
-            " 따뜻한 겉옷을 챙기세요."
-            if temp < 12
-            else " 가벼운 옷차림으로 준비하세요."
-            if temp >= 26
-            else " 가벼운 겉옷을 챙기세요."
-        )
-    if (rain is not None and rain >= 40) or weather.get("forecast_condition") in {
-        "rainy",
-        "pouring",
-        "lightning-rainy",
-        "snowy-rainy",
-    }:
-        message += " 우산을 챙기세요."
+    if include_advice:
+        message += " " + weather_advice(plan.weather) + " " + destination_advice(plan)
     return message

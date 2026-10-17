@@ -134,7 +134,7 @@ def test_manifest_and_translations_are_consistent():
     manifest = json.loads((root / "manifest.json").read_text(encoding="utf-8"))
     from custom_components.family_schedule_advisor.const import VERSION
 
-    assert manifest["version"] == VERSION == "0.5.2"
+    assert manifest["version"] == VERSION == "0.5.3"
     translations = [
         json.loads((root / "translations" / f"{lang}.json").read_text(encoding="utf-8"))
         for lang in ("en", "ko")
@@ -145,6 +145,7 @@ def test_manifest_and_translations_are_consistent():
         menus = data["options"]["step"]["init"]["menu_options"]
         assert set(menus) == {
             "general",
+            "ai",
             "places",
             "profiles",
             "notifications",

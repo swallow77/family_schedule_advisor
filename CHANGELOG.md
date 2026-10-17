@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.3
+
+- Add a native Telegram reminder channel for both preparation and departure stages, with per-plan route details and server acknowledgement before recording success.
+- Retain separate channel receipts and retry only failed channels; expose channel/target/status diagnostics and distinguish script completion from Telegram acceptance.
+- Reject the known no-op notification script so a deliberately empty script cannot be reported as successful delivery.
+- Allow up to 10 minutes for long queued voice announcements instead of timing out after 45 seconds.
+- Preserve completed stages when adding channels and migrate fully completed old receipts without replaying them. Partial deliveries remain retryable; snooze still resets the chosen stage.
+- Preserve local AI model selection, expanded weather/destination clothing advice, and spoken time formatting.
+
 ## 0.5.2
 
 - Explain preparation timing in setup, general options and family profile options with a concrete appointment/travel/margin/preparation example.
