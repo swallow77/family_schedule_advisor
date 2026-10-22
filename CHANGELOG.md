@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.4
+
+- Read explicit TTS playback results returned by notification scripts. A failed playback remains retryable without resending an accepted Telegram message.
+- Document the optional playback acknowledgement contract and Cast camera-display interference.
+
 ## 0.5.3
 
 - Add a native Telegram reminder channel for both preparation and departure stages, with per-plan route details and server acknowledgement before recording success.

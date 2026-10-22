@@ -13,7 +13,10 @@ import aiohttp
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from homeassistant.config_entries import ConfigEntry  # noqa: E402
-from homeassistant.core import HomeAssistant  # noqa: E402
+from homeassistant.core import HomeAssistant, SupportsResponse  # noqa: E402
+from homeassistant.exceptions import HomeAssistantError  # noqa: E402
+from homeassistant.helpers import config_validation as cv  # noqa: E402
+from homeassistant.helpers.script import Script  # noqa: E402
 from homeassistant.helpers.selector import NumberSelector  # noqa: E402
 from homeassistant.util import dt as dt_util  # noqa: E402
 
@@ -28,6 +31,9 @@ from custom_components.family_schedule_advisor.calendar_parser import (  # noqa:
     EventInfo,
 )
 from custom_components.family_schedule_advisor.google_directions import TransitResult  # noqa: E402
+from custom_components.family_schedule_advisor.notify import (  # noqa: E402
+    async_send_universal_notify,
+)
 
 
 def check_boxes(schema):
@@ -52,6 +58,43 @@ assert coordinator.FamilyScheduleAdvisorCoordinator is not None
 async def runtime_check():
     with TemporaryDirectory() as directory:
         hass = HomeAssistant(directory)
+        # Execute HA's real stop/response machinery behind the service boundary.
+        # No external service, speaker or notification is contacted.
+        for status in ("failed", "played", "suppressed"):
+            script = Script(
+                hass,
+                cv.SCRIPT_SCHEMA(
+                    [
+                        {"variables": {"result": {"tts_status": status}}},
+                        {"stop": "result", "response_variable": "result"},
+                    ]
+                ),
+                "playback_ack",
+                "script",
+            )
+
+            async def handler(call, instance=script):
+                result = await instance.async_run(dict(call.data))
+                return result.service_response
+
+            hass.services.async_register(
+                "script", "playback_ack", handler, supports_response=SupportsResponse.OPTIONAL
+            )
+            failed = False
+            try:
+                await async_send_universal_notify(
+                    hass,
+                    notify_script="script.playback_ack",
+                    message="isolated test",
+                    tts_target="media_player.test",
+                    tts_service="tts.speak",
+                    speed=1,
+                    pitch=0,
+                )
+            except HomeAssistantError:
+                failed = True
+            assert failed == (status == "failed")
+            await script.async_unload()
         entry = ConfigEntry(
             version=1,
             minor_version=1,

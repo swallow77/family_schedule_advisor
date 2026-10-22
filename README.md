@@ -100,6 +100,10 @@ https://github.com/swallow77/family_schedule_advisor
 
 기존 `script.universal_notify` 호출을 지원합니다. 다른 스크립트는 같은 입력 항목을 받아야 합니다.
 
+스크립트가 실제 재생을 확인한다면 응답으로 `tts_status: played`, 재생 실패 시 `tts_status: failed`와 `reason`, 조용한 시간·음악 보호 등 의도적으로 음성을 생략하면 `tts_status: suppressed`를 반환할 수 있습니다. 스크립트 마지막에 해당 사전을 담은 변수로 `stop`의 `response_variable`을 지정합니다. 실패 응답은 완료 기록을 남기지 않고 기존 재시도 정책을 적용하므로 이미 전송된 텔레그램은 반복하지 않습니다. 응답이 없는 기존 스크립트는 서비스 완료 여부만 확인합니다. Home Assistant의 `stop`과 `error: true`만으로는 상위 서비스 호출까지 실패가 전달되지 않을 수 있습니다.
+
+Cast 그룹의 구성원에 카메라 사진·영상을 표시하면 그룹 음성이 끊길 수 있습니다. 화면 표시 자동화는 음성 스크립트 실행 중 화면 재생을 생략하고, 지연된 화면 종료도 자신이 표시한 사진이 남아 있고 방송 중이 아닐 때만 실행하도록 보호해야 합니다.
+
 ```yaml
 message: 안내문
 tts: true

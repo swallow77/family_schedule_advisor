@@ -200,6 +200,40 @@ async def test_voice_timeout_allows_long_guidance(coordinator, monkeypatch):
     assert 600 in timeouts
 
 
+async def test_playback_failure_response_retries_only_voice(coordinator):
+    voice_attempts = 0
+
+    async def call(domain, service, data, **kwargs):
+        nonlocal voice_attempts
+        if domain == "telegram_bot":
+            return {"chats": [{"message_id": 12, "entity_id": "notify.telegram"}]}
+        assert kwargs["return_response"] is True
+        voice_attempts += 1
+        return {"tts_status": "failed" if voice_attempts == 1 else "played"}
+
+    coordinator.hass.services.async_call.side_effect = call
+    await coordinator._async_notify("default:one", "prepare")
+    assert "default:one:prepare:script" not in coordinator._sent
+    assert "default:one:prepare" not in coordinator._done
+    assert "default:one:prepare" in coordinator._retry_at
+    await coordinator._async_notify("default:one", "prepare")
+    assert "default:one:prepare" in coordinator._done
+    assert voice_attempts == 2
+    assert len(coordinator.hass.services.async_call.call_args_list) == 3
+
+
+async def test_intentionally_suppressed_voice_is_not_retried(coordinator):
+    async def call(domain, service, data, **kwargs):
+        if domain == "telegram_bot":
+            return {"chats": [{"message_id": 12, "entity_id": "notify.telegram"}]}
+        return {"tts_status": "suppressed", "reason": "music_protection"}
+
+    coordinator.hass.services.async_call.side_effect = call
+    await coordinator._async_notify("default:one", "prepare")
+    assert "default:one:prepare" in coordinator._done
+    assert not coordinator._retry_at
+
+
 async def test_notification_option_can_be_cleared_without_losing_others(entry):
     entry.options = {"telegram_reminder_entity": "notify.telegram", "prepare_minutes": 30}
     options = config_flow.FamilyScheduleAdvisorOptionsFlow()
