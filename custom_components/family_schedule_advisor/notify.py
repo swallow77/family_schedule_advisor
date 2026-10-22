@@ -91,7 +91,22 @@ async def async_send_universal_notify(
         "tts_service": tts_service,
         "tts_options": options,
     }
-    await hass.services.async_call(domain, service, data, blocking=True)
+    # HA consumes `stop` with error=true inside top-level scripts. Capture
+    # an explicit playback result rather than treating that abort as delivery.
+    result = await hass.services.async_call(
+        domain,
+        service,
+        data,
+        blocking=True,
+        **({"return_response": True} if domain == "script" else {}),
+    )
+    if isinstance(result, dict) and "tts_status" in result:
+        if result["tts_status"] == "failed":
+            raise HomeAssistantError(
+                "음성 재생 실패: " + str(result.get("reason") or "playback_not_confirmed")
+            )
+        if result["tts_status"] not in ("played", "suppressed"):
+            raise HomeAssistantError("알 수 없는 음성 재생 결과입니다")
 
 
 async def async_send_mobile_notify(
